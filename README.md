@@ -28,15 +28,29 @@ FalloutNV.exe (do usuário)
 
 ## Roadmap
 
-- [ ] M0 — Catálogo: recursive descent do `.text` (12,4 MB), medir funções
-      e taxa de cobertura dos seeds
-- [ ] M1 — Lift: gerar C de todas as funções catalogadas, 0 falhas,
-      difftest de amostras contra Unicorn
-- [ ] M2 — Compilar+linkar host Linux/AArch64 (PRoot) com runtime mínimo
-- [ ] M3 — Boot: WinMain alcançado, janela criada, D3D9 init via DXVK-Native
-- [ ] M4 — Primeiro frame / menu (Bink HLE, DirectSound/AAudio)
+- [x] M0 — Catálogo: 119.800 funções, 2.078.307 blocos (runner, ~6 min)
+- [x] M1 — Lift: 0 falhas, 28,9M linhas de C em 400 arquivos
+- [ ] M2 — Compilar+linkar host (win32hle) — rodando na CI
+- [ ] M3 — Boot permissivo + bring-up de imports (ver docs/M3_IMPORT_CENSUS.md)
+- [ ] M4 — Primeiro frame / menu (D3D9→Vulkan via DXVK-Native, Bink, DirectSound/AAudio)
 - [ ] M5 — APK: Gradle + NDK, touch controls, loader de assets do usuário
 - [ ] M6 — Gameplay mínimo: novo jogo, Goodsprings, save/load
+
+## Launcher (roadmap)
+
+- V1: detectar pasta do jogo no aparelho (BYOG manual)
+- V2: **login Steam do próprio usuário** (Steam Guard incluso) e download da
+  cópia que ele já possui (AppID 22380) direto dos servidores da Valve —
+  modelo GDroid. Zero arquivos distribuídos pela engine; aquisição limpa
+  com binário oficial intacto.
+- V3: **aba de Mods**:
+  - instação local (zip/7z → `Data/`), gerenciador de load order (estilo
+    Droid Mod Loader) — primeiro, 100% seguro;
+  - "fonte de mods" genérica e extensível que usa a chave de API pessoal do
+    próprio usuário e NUNCA re-hospeda arquivos (download sempre sai do
+    servidor original). UI genérica, sem branding de site.
+  - Nota honesta: mods dependentes de NVSE não funcionam no estágio inicial
+    (NVSE injeta no exe; suporte no recomp é projeto futuro).
 
 ## Estado
 
