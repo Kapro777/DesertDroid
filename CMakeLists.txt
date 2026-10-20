@@ -22,13 +22,14 @@ set(COMMON_INC "${RT}/recomp32" "${RT}/win32hle"
 add_library(dd_gen OBJECT ${GEN_SOURCES})
 target_compile_definitions(dd_gen PRIVATE ${COMMON_DEFS})
 target_include_directories(dd_gen PRIVATE ${COMMON_INC})
-# TUs gigantes: sem warnings, otimizacao leve, sem var-tracking
-target_compile_options(dd_gen PRIVATE -w -O1 -fno-strict-aliasing)
+# TUs gigantes: sem warnings, otimizacao leve; -fcommon: codigo traduzido de
+# binario antigo pode ter globais tentativos duplicados entre TUs (gcc>=10
+# usa -fno-common por padrao)
+target_compile_options(dd_gen PRIVATE -w -O1 -fno-strict-aliasing -fcommon)
 
 # ---- host DesertDroid + runtime portavel (win32hle) ----
 add_executable(DesertDroid
   src/host/main.c
-  ${RT}/recomp32/image_loader.c
   ${RT}/recomp32/recomp_trace.c
   ${RT}/win32hle/host_lite.c
   ${RT}/win32hle/kernel32.c
