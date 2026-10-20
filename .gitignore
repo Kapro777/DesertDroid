@@ -1,0 +1,31 @@
+# ---- NUNCA commitar dados do jogo ou derivados dele ----
+*.exe
+*.dll
+*.bsa
+*.esm
+*.esp
+*.nam
+*.ba2
+*.gcf
+*.vdf
+*.ini.local
+work/
+generated/
+gen/
+catalog*.json
+*_seeds*.json
+*.analysis.*
+
+# build / CI
+build/
+out/
+*.apk
+*.so
+*.a
+.gradle/
+local.properties
+
+# python
+__pycache__/
+*.pyc
+.venv/
