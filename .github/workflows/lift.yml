@@ -1,0 +1,96 @@
+name: lift
+# M0/M1: seeds -> catalog -> lift do FalloutNV.exe do PROPRIO usuario.
+# O exe chega por URL no disparo manual, fica so no runner e some no fim.
+# Nada derivado do jogo e publicado: so estatisticas de lift.
+on:
+  workflow_dispatch:
+    inputs:
+      game_url:
+        description: "URL do seu FalloutNV.exe (ou do .rar do jogo)"
+        required: true
+      expected_sha256:
+        description: "sha256 esperado do exe (opcional)"
+        required: false
+        default: "61de3c742bbb6c586cd4441fa3b3533bd493e86ee06debd9d83ff4d817c6fafd"
+
+jobs:
+  lift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      PCRECOMP: ${{ github.workspace }}/external/pcrecomp
+      WORK: ${{ github.workspace }}/work
+      EXE: ${{ github.workspace }}/work/FalloutNV.exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dependencias
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq unar > /dev/null
+          pip install -q capstone pefile
+
+      - name: pcrecomp pinned (35548b8) + 14 patches
+        run: |
+          git clone -q https://github.com/sp00nznet/pcrecomp.git external/pcrecomp
+          cd external/pcrecomp
+          git checkout -q 35548b8
+          git config user.name ci
+          git config user.email ci@localhost
+          git am -q "$GITHUB_WORKSPACE/patches/pcrecomp/"*.patch
+          git log --oneline -1
+
+      - name: Baixa o exe do usuario (nunca e commitado)
+        run: |
+          mkdir -p "$WORK"
+          curl -sSL --retry 3 -o "$WORK/game.download" "${{ inputs.game_url }}"
+          if file "$WORK/game.download" | grep -qi "RAR archive"; then
+            cd "$WORK"
+            unar -force-overwrite -quiet -o . game.download || true
+            FOUND=$(find . -name "FalloutNV.exe" | head -1)
+            test -n "$FOUND" || { echo "FalloutNV.exe nao achado dentro do rar"; exit 1; }
+            mv "$FOUND" "$EXE"
+          else
+            mv "$WORK/game.download" "$EXE"
+          fi
+          echo "sha256:"; sha256sum "$EXE"
+          if [ -n "${{ inputs.expected_sha256 }}" ]; then
+            echo "${{ inputs.expected_sha256 }}  $EXE" | sha256sum -c - || echo "::warning::sha256 difere do esperado (pode ser versao diferente do exe)"
+          fi
+          test -s "$EXE"
+
+      - name: Seeds (vtable + RTTI)
+        run: |
+          cd "$PCRECOMP"
+          python3 tools/cpp/vtable_scan.py "$EXE" --seeds "$WORK/vtable_seeds.json"
+          python3 tools/cpp/rtti.py "$EXE" --seeds "$WORK/rtti_seeds.json" --names "$WORK/names.json"
+          python3 "$GITHUB_WORKSPACE/tools/merge_seeds.py" "$EXE" "$WORK/seeds_all.json" \
+            "$WORK/vtable_seeds.json" "$WORK/rtti_seeds.json"
+
+      - name: Catalogo (recursive descent no .text)
+        run: |
+          python3 "$GITHUB_WORKSPACE/tools/run_lift.py" catalog "$EXE" \
+            "$WORK/seeds_all.json" "$WORK/catalog.json"
+
+      - name: Lift (x86-32 -> C)
+        run: |
+          python3 "$GITHUB_WORKSPACE/tools/run_lift.py" lift "$EXE" \
+            "$WORK/catalog.json" "$WORK/gen" --names "$WORK/names.json" --split 300
+
+      - name: Relatorio M0/M1 (somente estatisticas)
+        run: |
+          python3 "$GITHUB_WORKSPACE/tools/m0_report.py" "$WORK" > "$WORK/m0_report.txt"
+          cat "$WORK/m0_report.txt"
+
+      - name: Publica apenas o relatorio
+        uses: actions/upload-artifact@v4
+        with:
+          name: m0-report
+          path: |
+            work/m0_report.txt
+            work/gen/lift_stats.json
+          if-no-files-found: error
