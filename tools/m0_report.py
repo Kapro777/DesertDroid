@@ -36,18 +36,6 @@ def main(work):
         print("--- lift_stats.json ---")
         print(open(ls_path).read())
 
-    gen_dir = os.path.join(work, "gen")
-    if os.path.isdir(gen_dir):
-        cs_files = [f for f in os.listdir(gen_dir) if f.endswith(".c")]
-        total_lines = 0
-        total_bytes = 0
-        for f in cs_files:
-            p = os.path.join(gen_dir, f)
-            total_bytes += os.path.getsize(p)
-        print(f"C gerado:         {len(cs_files)} arquivos, "
-              f"{total_bytes / 1e6:.0f} MB (estimativa de ~"
-              f"{total_bytes / 35 / 1e6:.0f}M linhas)")
-
 
 if __name__ == "__main__":
     main(sys.argv[1])
