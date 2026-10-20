@@ -1,4 +1,6 @@
-# Fallout: New Vegas — Android Recomp (nome de trabalho: fnv-recompiled)
+# DesertDroid
+
+**Fallout: New Vegas nativo no Android (ARM64)** — engine/porte por static recompilation, no modelo GDroid/fallout2-ce.
 
 Porte nativo (ARM64/Android) de Fallout: New Vegas (PC, x86-32) por
 **static recompilation** — o mesmo modelo do porte de BLACK (xboxrecomp),
@@ -38,6 +40,9 @@ FalloutNV.exe (do usuário)
 
 ## Estado
 
-Em andamento — M0 (catálogo) rodando.
+Em andamento — M0/M1 (catálogo + lift) rodando via GitHub Actions (repo privado `fnv-build-inputs` segura o exe BYOG).
 Referências: external/pcrecomp (pinned 35548b8 + 14 patches nfsu2),
 external/nfsu2-recompiled (playbook Android), external/fnv-macos (difftest).
+
+**Divisão de trabalho**: tarefas leves (edição, scripts, análise) rodam no
+dispositivo; compilação e lift pesados rodam no GitHub Actions.
