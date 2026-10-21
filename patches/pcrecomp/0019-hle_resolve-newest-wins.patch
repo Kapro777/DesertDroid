@@ -1,0 +1,34 @@
+From cda2ac9b5b5c0b9db03f48835c109c18fe7e6e69 Mon Sep 17 00:00:00 2001
+From: tiny <tiny@localhost>
+Date: Wed, 21 Oct 2026 16:46:48 -0400
+Subject: [PATCH] hle_resolve/hle_name: newest-wins (hosts registram overrides
+ depois dos modulos base)
+
+---
+ runtime/win32hle/host_lite.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/runtime/win32hle/host_lite.c b/runtime/win32hle/host_lite.c
+index d9c46fa..20e552a 100644
+--- a/runtime/win32hle/host_lite.c
++++ b/runtime/win32hle/host_lite.c
+@@ -146,12 +146,14 @@ int win32hle_register(const win32hle_shim *shims) {
+     return added;
+ }
+ uint32_t hle_resolve(const char *name) {
+-    for (int i = 0; i < g_shim_n; i++)
++    /* newest wins: hosts registram overrides DEPOIS dos modulos base */
++    for (int i = g_shim_n - 1; i >= 0; i--)
+         if (!strcmp(g_shim[i].name, name)) return g_shim[i].va;
+     return 0;
+ }
+ const char *hle_name(uint32_t va) {
+-    for (int i = 0; i < g_shim_n; i++) if (g_shim[i].va == va) return g_shim[i].name;
++    for (int i = g_shim_n - 1; i >= 0; i--)
++        if (g_shim[i].va == va) return g_shim[i].name;
+     return NULL;
+ }
+ 
+-- 
+2.47.3
+

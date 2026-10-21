@@ -35,6 +35,7 @@ add_executable(DesertDroid
   src/host/dd_kernel32.c
   src/host/dd_sync.c
   src/host/dd_locale.c
+  src/host/dd_fs.c
   ${RT}/win32hle/guest_mem.c
   ${RT}/win32hle/host_lite.c
   ${RT}/win32hle/kernel32.c

@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <signal.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <sys/time.h>
 #include "host.h"
@@ -22,6 +23,8 @@ void dd_shims_register(void);
 void dd_kernel32_register(void);
 void dd_sync_register(void);
 void dd_locale_register(void);
+void dd_fs_register(void);
+void dd_fs_set_root(const char *host_dir);
 
 /* ---- crash report: todo sinal fatal nomeia a funcao liftada ---- */
 static void dd_crash(int sig, siginfo_t *si, void *ctx)
@@ -96,6 +99,17 @@ int main(int argc, char **argv)
     dd_kernel32_register(); /* lote 1: tempo, interlocked, TLS, ids  */
     dd_sync_register();    /* critical sections (init de Gamebryo/Havok) */
     dd_locale_register();  /* codepage/locale (init do CRT MSVC)         */
+    dd_fs_register();      /* filesystem: FindFirstFile, pastas, ExitProcess diag */
+
+    /* raiz de arquivos = pasta do exe do usuario (BYOG) */
+    {
+        static char dirbuf[1024];
+        snprintf(dirbuf, sizeof dirbuf, "%s", argv[1]);
+        char *slash = strrchr(dirbuf, '/');
+        if (slash) *slash = 0;
+        else strcpy(dirbuf, ".");
+        dd_fs_set_root(dirbuf);
+    }
 
     fprintf(stderr, "[DesertDroid] mapeando imagem: %s\n", argv[1]);
 
