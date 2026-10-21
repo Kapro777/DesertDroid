@@ -24,6 +24,8 @@ void dd_kernel32_register(void);
 void dd_sync_register(void);
 void dd_locale_register(void);
 void dd_fs_register(void);
+void dd_d3d9_register(void);
+void dd_dynload_register(void);
 void dd_fs_set_root(const char *host_dir);
 extern int win32hle_trace;   /* rastreamento de imports do proprio win32hle */
 
@@ -102,6 +104,8 @@ int main(int argc, char **argv)
     dd_sync_register();    /* critical sections (init de Gamebryo/Havok) */
     dd_locale_register();  /* codepage/locale (init do CRT MSVC)         */
     dd_fs_register();      /* filesystem: FindFirstFile, pastas, ExitProcess diag */
+    dd_dynload_register(); /* GetProcAddress de verdade                    */
+    dd_d3d9_register();     /* Direct3DCreate9 + COM HLE auto-anunciante    */
 
     /* raiz de arquivos = pasta do exe do usuario (BYOG) */
     {
