@@ -25,6 +25,7 @@ void dd_sync_register(void);
 void dd_locale_register(void);
 void dd_fs_register(void);
 void dd_fs_set_root(const char *host_dir);
+extern int win32hle_trace;   /* rastreamento de imports do proprio win32hle */
 
 /* ---- crash report: todo sinal fatal nomeia a funcao liftada ---- */
 static void dd_crash(int sig, siginfo_t *si, void *ctx)
@@ -76,8 +77,8 @@ static void dd_install_sampler(void)
     sa.sa_flags = SA_RESTART;
     sigaction(SIGALRM, &sa, NULL);
     struct itimerval it;
-    it.it_value.tv_sec = 1;  it.it_value.tv_usec = 0;
-    it.it_interval.tv_sec = 1; it.it_interval.tv_usec = 0;
+    it.it_value.tv_sec = 0;    it.it_value.tv_usec = 100000;    /* 100 ms */
+    it.it_interval.tv_sec = 0; it.it_interval.tv_usec = 100000;
     setitimer(ITIMER_REAL, &it, NULL);
 }
 
@@ -93,6 +94,7 @@ int main(int argc, char **argv)
 
     dd_install_crash_report();
     dd_install_sampler();
+    win32hle_trace = 1;    /* [hle] Nome — cada import chamado no boot */
 
     recomp_host_init();
     dd_shims_register();   /* ordinais: wsock32/dsound/xinput */
