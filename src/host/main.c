@@ -53,6 +53,30 @@ static void dd_install_crash_report(void)
     sigaction(SIGABRT, &sa, NULL);
 }
 
+/* ---- sampler: a cada 1s, onde o guest esta? (profiler caseiro do boot) ---- */
+static volatile uint64_t g_sample_n;
+static void dd_sample(int sig)
+{
+    (void)sig;
+    uint64_t n = ++g_sample_n;
+    fprintf(stderr, "[sample %llu] t=%llus funcao sub_%08X import=%s\n",
+            (unsigned long long)n, (unsigned long long)n,
+            g_cur_func, g_cur_import ? g_cur_import : "-");
+}
+
+static void dd_install_sampler(void)
+{
+    struct sigaction sa;
+    sa.sa_handler = dd_sample;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    sigaction(SIGALRM, &sa, NULL);
+    struct itimerval it;
+    it.it_value.tv_sec = 1;  it.it_value.tv_usec = 0;
+    it.it_interval.tv_sec = 1; it.it_interval.tv_usec = 0;
+    setitimer(ITIMER_REAL, &it, NULL);
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2) {
@@ -64,6 +88,7 @@ int main(int argc, char **argv)
     }
 
     dd_install_crash_report();
+    dd_install_sampler();
 
     recomp_host_init();
     dd_shims_register();   /* ordinais: wsock32/dsound/xinput */
