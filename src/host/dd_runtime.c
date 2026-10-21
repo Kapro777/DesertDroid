@@ -52,8 +52,37 @@ void recomp_unimpl(uint32_t va, const char *what)
 }
 
 /* ---- trace (o recomp_trace.c do pcrecomp é Windows-only) ---- */
-void recomp_trace_enter(uint32_t va) { (void)va; }
-void recomp_dump_trace(const char *why) { (void)why; }
+/* ---- trace de entry de funcoes (-DRECOMP_TRACE no codigo gerado) ----
+ * Ring das ultimas 512 funcoes + dump no ExitProcess/crash; entradas em
+ * codigo de jogo (VA < 0xE00000) imprimem na hora (ate o limite). */
+#define DD_TRACE_RING 512
+static uint32_t g_trace_ring[DD_TRACE_RING];
+static uint32_t g_trace_idx, g_trace_total, g_trace_printed;
+
+void dd_trace_dump(void)
+{
+    fprintf(stderr, "[trace] ultimas %u entradas (total %u):\n",
+             g_trace_total < DD_TRACE_RING ? g_trace_total : (uint32_t)DD_TRACE_RING,
+             g_trace_total);
+    uint32_t start = g_trace_total < DD_TRACE_RING ? 0 : g_trace_idx;
+    uint32_t count = g_trace_total < DD_TRACE_RING ? g_trace_total : DD_TRACE_RING;
+    for (uint32_t k = 0; k < count; k++) {
+        uint32_t va = g_trace_ring[(start + k) % DD_TRACE_RING];
+        fprintf(stderr, "[trace] #%u sub_%08X\n", g_trace_total - count + k, va);
+    }
+}
+
+void recomp_trace_enter(uint32_t va)
+{
+    g_trace_ring[g_trace_idx % DD_TRACE_RING] = va;
+    g_trace_idx++;
+    g_trace_total++;
+    if (va >= 0x00401000u && va < 0x00EC0000u && g_trace_printed < 2000) {
+        g_trace_printed++;
+        fprintf(stderr, "[entry] sub_%08X\n", va);
+    }
+}
+void recomp_dump_trace(const char *why) { (void)why; dd_trace_dump(); }
 void recomp_trace_flush(void) {}
 void recomp_trace_help(void) {}
 int  recomp_trace_arg(int argc, char **argv, int i)

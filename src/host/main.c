@@ -44,6 +44,10 @@ static void dd_crash(int sig, siginfo_t *si, void *ctx)
     fprintf(stderr, "  esp=%08X ebp=%08X esi=%08X edi=%08X\n",
             g_esp, g_ebp, g_esi, g_edi);
     fprintf(stderr, "  (mapear sub_XXXXXX em work/names.json ou no catalogo)\n");
+    {
+        extern void dd_trace_dump(void);
+        dd_trace_dump();
+    }
     _exit(128 + sig);
 }
 

@@ -239,11 +239,13 @@ static void k_CopyFileA(void)
 /* ---- ExitProcess com diagnostico (override de exit silencioso) ---- */
 extern uint32_t g_cur_func;
 extern const char *g_cur_import;
+void dd_trace_dump(void);
 static void k_ExitProcess(void)
 {
     fprintf(stderr, "[DesertDroid] ExitProcess(%u) chamado do guest "
             "sub_%08X (import: %s)\n",
             A32(0), g_cur_func, g_cur_import ? g_cur_import : "-");
+    dd_trace_dump();
     fflush(stderr);
     _exit((int)A32(0));
 }
