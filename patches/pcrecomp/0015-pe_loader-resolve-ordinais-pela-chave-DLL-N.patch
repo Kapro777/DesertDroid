@@ -1,0 +1,33 @@
+From feb9f448edf62ee1c988aea4004a9e73ec24f403 Mon Sep 17 00:00:00 2001
+From: tiny <tiny@localhost>
+Date: Wed, 21 Oct 2026 00:05:38 -0400
+Subject: [PATCH] pe_loader: resolve ordinais pela chave DLL#N (DesertDroid)
+
+---
+ runtime/win32hle/pe_loader.c | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/runtime/win32hle/pe_loader.c b/runtime/win32hle/pe_loader.c
+index 5895336..68bd7a7 100644
+--- a/runtime/win32hle/pe_loader.c
++++ b/runtime/win32hle/pe_loader.c
+@@ -109,9 +109,13 @@ int recomp_pe_bind(const pe_image *img, uint32_t (*resolve)(const char *name)) {
+         for (; *ilt; ilt++, iat++) {
+             uint32_t va = 0;
+             if (*ilt & PE_ORDINAL_FLAG) {
+-                /* by ordinal: win32hle keys shims by name, so leave it for the
+-                 * resolver to answer by "DLL#N" if it chooses. */
+-                va = 0;
++                /* by ordinal: resolve via "DLL#N" so a host can register
++                 * ordinal shims under a predictable key (DesertDroid). */
++                char key[96];
++                snprintf(key, sizeof key, "%s#%u", dll, *ilt & ~PE_ORDINAL_FLAG);
++                va = resolve(key);
++                if (!va) fprintf(stderr, "[pe] unresolved import %s!#%u\n",
++                                 dll, *ilt & ~PE_ORDINAL_FLAG);
+             } else {
+                 const char *name = (const char *)(uintptr_t)(base + *ilt + 2); /* skip hint word */
+                 va = resolve(name);
+-- 
+2.47.3
+
