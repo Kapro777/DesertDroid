@@ -161,6 +161,80 @@ static void k_TerminateProcess(void) { _exit((int)A32(1)); }
 static void k_GetModuleHandleW(void) { RET(0x00400000u, 1); }
 static void k_SetEnvironmentVariableA(void) { RET(1, 2); }
 
+/* ---- memoria / sistema (init do engine BGS/Gamebryo) ---- */
+typedef struct {
+    uint32_t dwLength, dwMemoryLoad;
+    uint64_t ullTotalPhys, ullAvailPhys;
+    uint64_t ullTotalPageFile, ullAvailPageFile;
+    uint64_t ullTotalVirtual, ullAvailVirtual;
+    uint64_t ullAvailExtendedVirtual;
+} MEMORYSTATUSEX_G;
+
+static void k_GlobalMemoryStatusEx(void)
+{
+    MEMORYSTATUSEX_G *m = (MEMORYSTATUSEX_G *)APTR(0);
+    if (!m || m->dwLength < sizeof *m) RET(0, 1);
+    m->dwMemoryLoad  = 50;
+    m->ullTotalPhys = 2ull << 30;      /* 2 GB enderecaveis (exe sem LAA) */
+    m->ullAvailPhys  = 1536ull << 20;
+    m->ullTotalPageFile  = m->ullTotalPhys;
+    m->ullAvailPageFile  = m->ullAvailPhys;
+    m->ullTotalVirtual   = 0x7FFEFFFFull;
+    m->ullAvailVirtual   = 1536ull << 20;
+    m->ullAvailExtendedVirtual = 0;
+    RET(1, 1);
+}
+
+typedef struct {
+    uint16_t wProcessorArchitecture, wReserved;
+    uint32_t dwPageSize, lpMinimumApplicationAddress;
+    uint32_t lpMaximumApplicationAddress, dwActiveProcessorMask;
+    uint32_t dwNumberOfProcessors, dwProcessorType;
+    uint16_t wProcessorLevel, wProcessorRevision;
+} SYSTEM_INFO_G;
+
+static void k_GetSystemInfo(void)
+{
+    SYSTEM_INFO_G *s = (SYSTEM_INFO_G *)APTR(0);
+    s->wProcessorArchitecture = 0;               /* PROCESSOR_ARCHITECTURE_INTEL */
+    s->dwPageSize               = 4096;
+    s->lpMinimumApplicationAddress = 0x10000;
+    s->lpMaximumApplicationAddress = 0x7FFEFFFF;
+    s->dwActiveProcessorMask    = 0xFF;
+    s->dwNumberOfProcessors     = 4;
+    s->dwProcessorType          = 586;           /* PROCESSOR_INTEL_PENTIUM */
+    s->wProcessorLevel          = 6;
+    s->wProcessorRevision       = 0;
+    RETV(1);
+}
+
+/* timeGetTime: milissegundos monotonicos (o engine chama isso o tempo todo) */
+static void k_timeGetTime(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    RET((uint32_t)((uint64_t)ts.tv_sec * 1000ull + (uint64_t)ts.tv_nsec / 1000000ull), 0);
+}
+
+/* SHGetFolderPathA(hwnd, nFolder, hToken, dwFlags, pszPath) -> S_OK */
+static void k_SHGetFolderPathA(void)
+{
+    char *path = (char *)APTR(4);
+    if (path) strcpy(path, "C:\\Users\\Player\\Documents");
+    RET(0, 5);                                   /* S_OK */
+}
+
+/* GetUserNameA(lpBuffer, lpnSize) */
+static void k_GetUserNameA(void)
+{
+    char *buf = (char *)APTR(0);
+    uint32_t *nsize = (uint32_t *)APTR(1);
+    if (!buf || !nsize) RET(0, 2);
+    strcpy(buf, "DesertDroid");
+    *nsize = 12;                                 /* com NUL */
+    RET(1, 2);
+}
+
 static const win32hle_shim dd_shims_kernel32[] = {
     { "GetSystemTimeAsFileTime", k_GetSystemTimeAsFileTime },
     { "QueryPerformanceCounter", k_QueryPerformanceCounter },
@@ -180,6 +254,11 @@ static const win32hle_shim dd_shims_kernel32[] = {
     { "TlsGetValue",             k_TlsGetValue },
     { "TlsSetValue",             k_TlsSetValue },
     { "HeapCreate",              k_HeapCreate },
+    { "GlobalMemoryStatusEx",    k_GlobalMemoryStatusEx },
+    { "GetSystemInfo",           k_GetSystemInfo },
+    { "timeGetTime",             k_timeGetTime },
+    { "SHGetFolderPathA",        k_SHGetFolderPathA },
+    { "GetUserNameA",            k_GetUserNameA },
     { "TerminateProcess",        k_TerminateProcess },
     { "GetModuleHandleW",        k_GetModuleHandleW },
     { "SetEnvironmentVariableA",  k_SetEnvironmentVariableA },
