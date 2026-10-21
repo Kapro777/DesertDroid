@@ -1,0 +1,244 @@
+From 5f7ad5992cc8db8408aecee53af0fb1a87603d50 Mon Sep 17 00:00:00 2001
+From: tiny <tiny@localhost>
+Date: Wed, 21 Oct 2026 08:36:32 -0400
+Subject: [PATCH] =?UTF-8?q?win32hle:=20arena=20de=20guest=20em=20VA=20baix?=
+ =?UTF-8?q?o=20(guest=5Fmem)=20=E2=80=94=20stack,=20TIB,=20Heap/Local/Glob?=
+ =?UTF-8?q?al/VirtualAlloc=20e=20DIB=20visiveis=20ao=20guest=20em=20hosts?=
+ =?UTF-8?q?=2064-bit?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ runtime/win32hle/gdi32.c        |  3 +-
+ runtime/win32hle/guest_mem.c    | 63 +++++++++++++++++++++++++++++++++
+ runtime/win32hle/guest_mem.h    | 24 +++++++++++++
+ runtime/win32hle/host_lite.c    | 10 +++---
+ runtime/win32hle/kernel32.c     | 13 +++----
+ runtime/win32hle/kernel32_ext.c |  3 +-
+ 6 files changed, 104 insertions(+), 12 deletions(-)
+ create mode 100644 runtime/win32hle/guest_mem.c
+ create mode 100644 runtime/win32hle/guest_mem.h
+
+diff --git a/runtime/win32hle/gdi32.c b/runtime/win32hle/gdi32.c
+index 6dc0f98..40d4f12 100644
+--- a/runtime/win32hle/gdi32.c
++++ b/runtime/win32hle/gdi32.c
+@@ -9,6 +9,7 @@
+  * nearest-neighbour. 8/16/24bpp and palettes come with the palette layer.
+  */
+ #define _GNU_SOURCE
++#include "guest_mem.h"
+ #include <stdint.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -48,7 +49,7 @@ static void g_CreateDIBSection(void) {
+     int w = bi_w(bmi), h = bi_h(bmi), bpp = bi_bpp(bmi);
+     if (bpp != 32) hle_fatal("CreateDIBSection: only 32bpp supported for now, got %d", bpp);
+     int hab = h < 0 ? -h : h;
+-    uint32_t *bits = (uint32_t *)calloc((size_t)w * hab, 4);
++    uint32_t *bits = (uint32_t *)guest_ptr(guest_alloc((size_t)w * hab * 4));
+     if (g_dib_n < MAX_DIBS) {
+         g_dibs[g_dib_n].h = g_next_handle;
+         g_dibs[g_dib_n].bits = bits; g_dibs[g_dib_n].w = w;
+diff --git a/runtime/win32hle/guest_mem.c b/runtime/win32hle/guest_mem.c
+new file mode 100644
+index 0000000..3fdb4bd
+--- /dev/null
++++ b/runtime/win32hle/guest_mem.c
+@@ -0,0 +1,63 @@
++/* guest_mem.c — arena de guest em VA baixo para hosts 64-bit (DesertDroid).
++ *
++ * Uma reserva MAP_NORESERVE em VA fixo abaixo de 4 GB; alocacoes sao bump
++ * alinhado a 16 (paginas anonimas ja vem zeradas). E o equivalente do
++ * GuestMemory do nfsu2-android, no tamanho que o boot do jogo precisa.
++ */
++#define _GNU_SOURCE
++#include <stdio.h>
++#include <stdint.h>
++#include <stddef.h>
++#include <sys/mman.h>
++#include "guest_mem.h"
++
++#define ARENA_BASE 0x50000000u   /* longe da imagem (0x400000..) e dos shims (0x7F000000..) */
++#define ARENA_SIZE 0x18000000ull /* 384 MB reservados; paginas so viram ao tocar */
++
++static volatile uint64_t g_bump;   /* offset do proximo bloco na arena */
++static int g_arena_ok;
++
++static int arena_init(void)
++{
++    void *p = mmap((void *)(uintptr_t)ARENA_BASE, ARENA_SIZE,
++                   PROT_READ | PROT_WRITE,
++                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED,
++                   -1, 0);
++    if (p != (void *)(uintptr_t)ARENA_BASE) {
++        fprintf(stderr, "[guest_mem] mmap da arena em %#x falhou (%p)\n",
++                ARENA_BASE, p);
++        return 0;
++    }
++    g_bump = 0;
++    g_arena_ok = 1;
++    fprintf(stderr, "[guest_mem] arena de guest em %#x..%#llx\n",
++            ARENA_BASE, (unsigned long long)(ARENA_BASE + ARENA_SIZE));
++    return 1;
++}
++
++uint32_t guest_alloc(size_t size)
++{
++    if (!g_arena_ok && !arena_init()) return 0;
++    if (size == 0) size = 1;
++    size = (size + 15u) & ~(size_t)15u;
++    uint64_t off = __sync_fetch_and_add(&g_bump, size);
++    if (off + size > ARENA_SIZE) return 0;
++    return ARENA_BASE + (uint32_t)off;
++}
++
++uint32_t guest_alloc_at(uint32_t va, size_t size)
++{
++    if (!va) return guest_alloc(size);
++    if (size == 0) size = 1;
++    size = (size + 0xFFFu) & ~(size_t)0xFFFu;
++    void *p = mmap((void *)(uintptr_t)va, size,
++                   PROT_READ | PROT_WRITE,
++                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED,
++                   -1, 0);
++    return (p == (void *)(uintptr_t)va) ? va : 0;
++}
++
++void *guest_ptr(uint32_t va)
++{
++    return (void *)(uintptr_t)va;
++}
+diff --git a/runtime/win32hle/guest_mem.h b/runtime/win32hle/guest_mem.h
+new file mode 100644
+index 0000000..f68fb26
+--- /dev/null
++++ b/runtime/win32hle/guest_mem.h
+@@ -0,0 +1,24 @@
++/* guest_mem.h — alocacoes visiveis ao guest em hosts 64-bit (DesertDroid).
++ *
++ * O modelo RECOMP_FLAT_MEMORY trata o VA de 32 bits do guest como endereco
++ * literal do host. Em um host 64-bit, malloc/calloc devolvem ponteiros acima
++ * de 4 GB que, truncados ao devolver ao guest, apontam para memoria nao
++ * mapeada. Toda memoria que o guest recebe como ponteiro deve sair daqui:
++ * uma arena reservada em VA baixo.
++ */
++#ifndef WIN32HLE_GUEST_MEM_H
++#define WIN32HLE_GUEST_MEM_H
++#include <stdint.h>
++#include <stddef.h>
++
++/* VA de guest de um bloco novo (alinhado a 16, zerado), ou 0 se esgotado. */
++uint32_t guest_alloc(size_t size);
++
++/* O mesmo, em um VA pedido pelo guest (VirtualAlloc com endereco): mapeia
++ * paginas reais no va. Retorna o va ou 0. */
++uint32_t guest_alloc_at(uint32_t va, size_t size);
++
++/* VA de guest -> ponteiro host (no modelo flat e o proprio endereco). */
++void *guest_ptr(uint32_t va);
++
++#endif
+diff --git a/runtime/win32hle/host_lite.c b/runtime/win32hle/host_lite.c
+index 81ee36c..d9c46fa 100644
+--- a/runtime/win32hle/host_lite.c
++++ b/runtime/win32hle/host_lite.c
+@@ -12,6 +12,7 @@
+  * adds image mapping and IAT binding on top; those are separate.
+  */
+ #define _GNU_SOURCE   /* PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP */
++#include "guest_mem.h"
+ #include <stdint.h>
+ #include <stddef.h>
+ #include <stdio.h>
+@@ -83,12 +84,13 @@ static void regs_load(const regs_t *r) {
+ #define GUEST_STACK (4u << 20)
+ 
+ static uint32_t make_tib(uint32_t lo, uint32_t hi) {
+-    uint32_t *t = (uint32_t *)calloc(1, 0x1000);
++    uint32_t tva = guest_alloc(0x1000);
++    uint32_t *t = (uint32_t *)guest_ptr(tva);
+     t[0]        = 0xFFFFFFFFu;                 /* ExceptionList: end of chain */
+     t[1]        = hi;                          /* StackBase                   */
+     t[2]        = lo;                          /* StackLimit                  */
+-    t[0x18/4]   = (uint32_t)(uintptr_t)t;      /* Self (fs:[0x18])            */
+-    return (uint32_t)(uintptr_t)t;
++    t[0x18/4]   = tva;                         /* Self (fs:[0x18])            */
++    return tva;
+ }
+ 
+ typedef struct { regs_t r; int depth, inited; } mstate;
+@@ -97,7 +99,7 @@ static __thread mstate g_ms;
+ void mach_enter(void) {
+     pthread_mutex_lock(&g_mach);
+     if (!g_ms.inited) {
+-        uint32_t lo = (uint32_t)(uintptr_t)calloc(1, GUEST_STACK);
++        uint32_t lo = guest_alloc(GUEST_STACK);
+         g_ms.r.esp    = lo + GUEST_STACK - 64;
+         g_ms.r.fs     = make_tib(lo, lo + GUEST_STACK);
+         g_ms.r.fpu_cw = 0x027F;
+diff --git a/runtime/win32hle/kernel32.c b/runtime/win32hle/kernel32.c
+index 9494bbc..32ba92b 100644
+--- a/runtime/win32hle/kernel32.c
++++ b/runtime/win32hle/kernel32.c
+@@ -11,6 +11,7 @@
+ #include <string.h>
+ #include <time.h>
+ #include <unistd.h>
++#include "guest_mem.h"
+ #include <pthread.h>
+ #include "win32hle.h"
+ 
+@@ -33,21 +34,21 @@ static void k_GetVersion(void)        { RET(5u | (0u<<8) | (2195u<<16), 0); }
+ /* --- heap --- */
+ static void k_HeapAlloc(void) {                                         /* (hHeap, flags, size) */
+     uint32_t flags = A32(1), size = A32(2);
+-    void *p = (flags & HEAP_ZERO_MEMORY) ? calloc(1, size) : malloc(size);
++    void *p = guest_ptr(guest_alloc(size));
++    if (flags & HEAP_ZERO_MEMORY) memset(p, 0, size);
+     RETP(p, 3);
+ }
+ static void k_HeapFree(void)   { free(APTR(2)); RET(1, 3); }            /* (hHeap, flags, ptr) */
+ static void k_HeapReAlloc(void){ RETP(realloc(APTR(2), A32(3)), 4); }   /* (hHeap, flags, ptr, size) */
+ static void k_HeapSize(void)   { RET(0xFFFFFFFFu, 3); }                 /* unknown; callers rarely trust it */
+-static void k_LocalAlloc(void) { uint32_t flags=A32(0), n=A32(1); RETP(flags&0x40?calloc(1,n):malloc(n), 2); }
++static void k_LocalAlloc(void) { uint32_t flags=A32(0), n=A32(1); RETP(guest_alloc(n), 2); }
+ static void k_LocalFree(void)  { free(APTR(0)); RET(0, 1); }
+ 
+-/* VirtualAlloc(addr, size, type, protect): MEM_RESERVE/COMMIT -> a plain
+- * allocation. If the guest asked for a fixed address we honour it (it is a
+- * host pointer on a 32-bit host); otherwise hand back fresh memory. */
++/* VirtualAlloc(addr, size, type, protect): MEM_RESERVE/COMMIT -> arena de
++ * guest (em VA baixo). Se o guest pediu endereco fixo, mapeia la. */
+ static void k_VirtualAlloc(void) {
+     uint32_t addr = A32(0), size = A32(1);
+-    RETP(addr ? (void *)(uintptr_t)addr : calloc(1, size), 4);
++    RETP(guest_alloc_at(addr, size), 4);
+ }
+ static void k_VirtualFree(void) { RET(1, 3); }
+ 
+diff --git a/runtime/win32hle/kernel32_ext.c b/runtime/win32hle/kernel32_ext.c
+index 22827be..c307ad3 100644
+--- a/runtime/win32hle/kernel32_ext.c
++++ b/runtime/win32hle/kernel32_ext.c
+@@ -9,6 +9,7 @@
+  * the CRT's locale queries) is filled in as a lift actually calls it.
+  */
+ #define _GNU_SOURCE
++#include "guest_mem.h"
+ #include <stdint.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -86,7 +87,7 @@ static void k_CloseHandle(void) { file_close(A32(0)); RET(1, 1); }
+ 
+ /* ---- Global* (we use GMEM_FIXED semantics: HGLOBAL == the pointer) ---- */
+ #define GMEM_ZEROINIT 0x0040u
+-static void k_GlobalAlloc(void) { uint32_t fl = A32(0), n = A32(1); RETP(fl & GMEM_ZEROINIT ? calloc(1, n) : malloc(n), 2); }
++static void k_GlobalAlloc(void) { uint32_t fl = A32(0), n = A32(1); RETP(guest_alloc(n), 2); }
+ static void k_GlobalFree(void)  { free(APTR(0)); RET(0, 1); }
+ static void k_GlobalLock(void)  { RETP(APTR(0), 1); }          /* already a pointer */
+ static void k_GlobalUnlock(void){ RET(1, 1); }
+-- 
+2.47.3
+
