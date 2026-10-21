@@ -18,6 +18,7 @@ extern uint32_t    g_cur_func;
 extern const char *g_cur_import;
 
 void dd_shims_register(void);
+void dd_kernel32_register(void);
 
 /* ---- crash report: todo sinal fatal nomeia a funcao liftada ---- */
 static void dd_crash(int sig, siginfo_t *si, void *ctx)
@@ -64,6 +65,7 @@ int main(int argc, char **argv)
 
     recomp_host_init();
     dd_shims_register();   /* ordinais: wsock32/dsound/xinput */
+    dd_kernel32_register(); /* lote 1: tempo, interlocked, TLS, ids  */
 
     fprintf(stderr, "[DesertDroid] mapeando imagem: %s\n", argv[1]);
 
