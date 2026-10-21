@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <ctype.h>
+#include <wctype.h>
 #include "win32hle.h"
 
 #define DD_LCID_EN_US 0x0409u
