@@ -1,0 +1,62 @@
+From 7760fab0ac839725f57f9a78e09ebb35bab05e37 Mon Sep 17 00:00:00 2001
+From: tiny <tiny@localhost>
+Date: Wed, 21 Oct 2026 17:57:59 -0400
+Subject: [PATCH] =?UTF-8?q?recomp=5Ftypes:=20CPUID=20portatil=20(GCC/Clang?=
+ =?UTF-8?q?=20era=20no-op;=20respostas=20P4-classicas=20mascaradas=20pelos?=
+ =?UTF-8?q?=20knobs)=20=E2=80=94=20checks=20SSE2=20de=20engine=20nao=20fal?=
+ =?UTF-8?q?ham=20mais=20em=20silencio?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ runtime/recomp32/recomp_types.h | 33 ++++++++++++++++++++++++++++++++-
+ 1 file changed, 32 insertions(+), 1 deletion(-)
+
+diff --git a/runtime/recomp32/recomp_types.h b/runtime/recomp32/recomp_types.h
+index 5286bd3..d3b781d 100644
+--- a/runtime/recomp32/recomp_types.h
++++ b/runtime/recomp32/recomp_types.h
+@@ -997,7 +997,38 @@ static inline void CPUID_impl(uint32_t eax_val, uint32_t ebx_val, uint32_t ecx_v
+     if (eax_val == 0x80000001u) g_edx &= g_cpuid_edx_ext;
+     (void)ebx_val; (void)edx_val;
+ #else
+-    (void)eax_val; (void)ebx_val; (void)ecx_val; (void)edx_val;
++    /* Portable CPUID (hosts GCC/Clang): respostas Pentium-4-classicas,
++     * mascaradas pelos knobs fracos. Sem isto, cpuid e um no-op e o jogo
++     * le registradores velhos — checks de SSE2 de engine falham em
++     * silencio e o jogo sai com exit(0). (DesertDroid patch 0020) */
++    (void)ebx_val; (void)edx_val;
++    uint32_t feat_edx = 0xBFEBFBFFu;   /* FPU..MMX..SSE2..HTT (P4 classico) */
++    uint32_t feat_ecx = 0;             /* SSE3+ fora: o lifter cobre ate SSE2 */
++    switch (eax_val) {
++    case 0:
++        g_eax = 0x0000000A;            /* max basic leaf */
++        g_ebx = 0x756E6547u;           /* 'Genu' */
++        g_ecx = 0x49656E69u;           /* 'ineI' */
++        g_edx = 0x6C65746Eu;           /* 'ntel'  -> GenuineIntel */
++        break;
++    case 1:
++        g_eax = 0x00000F29u;           /* family 15, model 2, stepping 9 */
++        g_ebx = 0x00000000u;
++        g_ecx = feat_ecx & g_cpuid_ecx1;
++        g_edx = feat_edx & g_cpuid_edx1;
++        break;
++    case 0x80000000u:
++        g_eax = 0x80000008u;
++        g_ebx = g_ecx = g_edx = 0;
++        break;
++    case 0x80000001u:
++        g_eax = 0; g_ebx = 0; g_ecx = 0;
++        g_edx = 0x00800000u & g_cpuid_edx_ext;  /* so a flag classica (bit 23) */
++        break;
++    default:
++        g_eax = g_ebx = g_ecx = g_edx = 0;
++        break;
++    }
+ #endif
+ }
+ 
+-- 
+2.47.3
+

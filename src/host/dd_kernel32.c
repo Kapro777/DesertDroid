@@ -235,6 +235,16 @@ static void k_GetUserNameA(void)
     RET(1, 2);
 }
 
+/* IsProcessorFeaturePresent(n) — via GetProcAddress; coerente com o CPUID */
+static void k_IsProcessorFeaturePresent(void)
+{
+    uint32_t f = A32(0);
+    /* 0 FP errata, 2 CMPXCHG8B, 3 MMX, 8 RDTSC, 9 XMMI(SSE), 10 XMMI2(SSE2) */
+    static const uint32_t supported = (1u << 0) | (1u << 2) | (1u << 3) |
+                                      (1u << 8) | (1u << 9) | (1u << 10);
+    RET(f < 32 && (supported & (1u << f)) ? 1u : 0u, 1);
+}
+
 static const win32hle_shim dd_shims_kernel32[] = {
     { "GetSystemTimeAsFileTime", k_GetSystemTimeAsFileTime },
     { "QueryPerformanceCounter", k_QueryPerformanceCounter },
@@ -259,6 +269,7 @@ static const win32hle_shim dd_shims_kernel32[] = {
     { "timeGetTime",             k_timeGetTime },
     { "SHGetFolderPathA",        k_SHGetFolderPathA },
     { "GetUserNameA",            k_GetUserNameA },
+    { "IsProcessorFeaturePresent", k_IsProcessorFeaturePresent },
     { "TerminateProcess",        k_TerminateProcess },
     { "GetModuleHandleW",        k_GetModuleHandleW },
     { "SetEnvironmentVariableA",  k_SetEnvironmentVariableA },
