@@ -30,7 +30,7 @@ target_compile_options(dd_gen PRIVATE -w -O1 -fno-strict-aliasing -fcommon)
 # ---- host DesertDroid + runtime portavel (win32hle) ----
 add_executable(DesertDroid
   src/host/main.c
-  ${RT}/recomp32/recomp_trace.c
+  src/host/trace_stub.c
   ${RT}/win32hle/host_lite.c
   ${RT}/win32hle/kernel32.c
   ${RT}/win32hle/kernel32_crt.c
