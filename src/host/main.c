@@ -10,6 +10,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/time.h>
 #include "host.h"
 
 /* estado do guest (definidos no host_lite/recomp_types.h) */
