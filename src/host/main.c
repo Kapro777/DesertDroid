@@ -135,14 +135,14 @@ int main(int argc, char **argv)
 
     /* O entry do PE deste exe e' adulterado (SteamRIP: mid-instruction,
      * decode vaga e pula a chamada do WinMain). Boot no fluxo real do CRT:
-     * 0xECB8DB = __security_init_cookie() + jmp __scrt_common_main_seh —
-     * a sequencia exata de WinMainCRTStartup, verificada por xref local. */
-    #define DD_REAL_ENTRY 0x00ECB8DBu
+     * __security_init_cookie (0xEDCF9C) + __scrt_common_main_seh (0xECB75D)
+     * — a sequencia exata de WinMainCRTStartup, verificada por xref local. */
     {
         extern uint32_t hle_call_guest(uint32_t va, int nargs, const uint32_t *args);
-        fprintf(stderr, "[DesertDroid] boot no CRT real (sub_%08X)...\n",
-                DD_REAL_ENTRY);
-        uint32_t rc = hle_call_guest(DD_REAL_ENTRY, 0, NULL);
+        fprintf(stderr, "[DesertDroid] boot no CRT real "
+                "(cookie sub_00EDCF9C + scrt sub_00ECB75D)...\n");
+        hle_call_guest(0x00EDCF9Cu, 0, NULL);            /* cookie    */
+        uint32_t rc = hle_call_guest(0x00ECB75Du, 0, NULL); /* scrt_seh */
         fprintf(stderr, "[DesertDroid] fluxo principal retornou %u\n", rc);
         return (int)rc;
     }
