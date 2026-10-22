@@ -52,6 +52,22 @@ FalloutNV.exe (do usuário)
   - Nota honesta: mods dependentes de NVSE não funcionam no estágio inicial
     (NVSE injeta no exe; suporte no recomp é projeto futuro).
 
+## Controles touch (especificação, M5)
+
+1. **Overlay no jogo**: botões equivalentes aos que o jogo usa, com ícones
+   de controle (padrão Xbox: A/B/X/Y, LB/RB, LT/RT, d-pad, analógicos) —
+   o FNV no PC usa o padrão de controle, os ícones refletem isso.
+2. **Auto-ocultar**: detectar InputDevice físico (mouse, teclado ou
+   controle USB/Bluetooth) → overlay some suave; desconectou → volta.
+   (Android: `InputManager.InputDeviceListener`.)
+3. **Editor de layout NO MENU DA ENGINE** (launcher, nunca dentro do jogo):
+   - arrastar e reposicionar botões (drag-and-drop, como o nfsu2 faz);
+   - adicionar novos botões/teclas ou desativar os não usados;
+   - botões de TECLADO (WASD, E, Tab, esc...) e de CONTROLE (A/B/X/Y...) —
+     porque dá pra mapear os dois;
+   - salvar layouts nomeados + presets (padrão, FPS, RPG...).
+4. **No jogo**: só os botões já configurados, zero UI de configuração.
+
 ## Estado
 
 Em andamento — M0/M1 (catálogo + lift) rodando via GitHub Actions (repo privado `fnv-build-inputs` segura o exe BYOG).
