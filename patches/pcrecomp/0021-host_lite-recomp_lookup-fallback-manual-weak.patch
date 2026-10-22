@@ -1,0 +1,35 @@
+From 3d2d5b0e513f463ec647521141857a13ad2602d3 Mon Sep 17 00:00:00 2001
+From: tiny <tiny@localhost>
+Date: Thu, 22 Oct 2026 12:51:31 -0400
+Subject: [PATCH] =?UTF-8?q?host=5Flite:=20recomp=5Flookup=20cai=20no=20rec?=
+ =?UTF-8?q?omp=5Flookup=5Fmanual=20(fallback)=20e=20o=20default=20manual?=
+ =?UTF-8?q?=20fica=20weak=20=E2=80=94=20hosts=20registram=20overrides=20fo?=
+ =?UTF-8?q?ra=20do=20catalogo?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ runtime/win32hle/host_lite.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/runtime/win32hle/host_lite.c b/runtime/win32hle/host_lite.c
+index 20e552a..8bbf336 100644
+--- a/runtime/win32hle/host_lite.c
++++ b/runtime/win32hle/host_lite.c
+@@ -122,9 +122,10 @@ recomp_func_t recomp_lookup(uint32_t va) {
+         if (m == va) return recomp_dispatch_table[mid].func;
+         if (m < va) lo = mid + 1; else hi = mid;
+     }
+-    return NULL;
++    /* fora da tabela: overrides manuais do host (DesertDroid patch 0021) */
++    return recomp_lookup_manual(va);
+ }
+-recomp_func_t recomp_lookup_manual(uint32_t va) { (void)va; return NULL; }
++RECOMP_WEAK recomp_func_t recomp_lookup_manual(uint32_t va) { (void)va; return NULL; }
+ 
+ /* --------------------------------------------------------- shim registry
+  * Each shim gets a synthetic VA in a reserved range that no real image uses. */
+-- 
+2.47.3
+

@@ -52,6 +52,30 @@ void recomp_unimpl(uint32_t va, const char *what)
 }
 
 /* ---- trace (o recomp_trace.c do pcrecomp é Windows-only) ---- */
+/* ---- overrides manuais (recomp_lookup_manual) ----
+ * Funcoes cujo comeco verdadeiro nao e fronteira do catalogo (scrt, WinMain)
+ * sao liftadas por tools/lift_override.py na CI e registradas aqui. */
+#define DD_MAX_OVERRIDES 16
+static struct { uint32_t va; recomp_func_t fn; } g_overrides[DD_MAX_OVERRIDES];
+static int g_override_n;
+
+void dd_overrides_add(uint32_t va, recomp_func_t fn)
+{
+    if (g_override_n < DD_MAX_OVERRIDES) {
+        g_overrides[g_override_n].va = va;
+        g_overrides[g_override_n].fn = fn;
+        g_override_n++;
+        fprintf(stderr, "[DesertDroid] override sub_%08X registrado\n", va);
+    }
+}
+
+recomp_func_t recomp_lookup_manual(uint32_t va)
+{
+    for (int i = 0; i < g_override_n; i++)
+        if (g_overrides[i].va == va) return g_overrides[i].fn;
+    return NULL;
+}
+
 /* ---- trace de entry de funcoes (-DRECOMP_TRACE no codigo gerado) ----
  * Ring das ultimas 512 funcoes + dump no ExitProcess/crash; entradas em
  * codigo de jogo (VA < 0xE00000) imprimem na hora (ate o limite). */
