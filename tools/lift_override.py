@@ -32,10 +32,11 @@ def lift_one(exe, cat, names, seed, end, out):
     data = open(exe, "rb").read()
     lifted = {fd["address"] for fd in cat["functions"]}
     dis = disasm32.Disassembler(data, info.image_base, info.sections)
-    funcs = dis.find_functions(seed, end, iat, seeds={seed}, release_operands=False)
-    f = funcs.get(seed)
-    if not f:
-        print(f"[override] nada em {seed:#x} (range ate {end:#x})")
+    # descent DIRETO da funcao (sem find_functions: o cascade de discovery
+    # la fora cobre o seed como interior de outra funcao e o dropa)
+    f = dis.disassemble_function(seed, iat)
+    if not (f and f.blocks):
+        print(f"[override] disassemble_function falhou em {seed:#x}")
         return 1
     lifter = Lifter(iat_map=iat, func_names=names, lifted=lifted,
                     precise_carry=True, hook_sites=set())

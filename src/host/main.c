@@ -134,26 +134,9 @@ int main(int argc, char **argv)
     fprintf(stderr, "[DesertDroid] imagem mapeada, entry VA %#x\n",
             recomp_host_entry());
 
-    /* O entry do PE deste exe e' adulterado (SteamRIP: fragmento de 10 bytes).
-     * Boot no scrt REAL (0xECB75D) — o comeco verdadeiro nao e fronteira do
-     * catalogo (o descent fundiu com funcoes matematicas do CRT), entao a CI
-     * o lifta via tools/lift_override.py e registra na tabela de overrides. */
-    {
-        extern uint32_t hle_call_guest(uint32_t va, int nargs, const uint32_t *args);
-        extern recomp_func_t recomp_lookup(uint32_t va);   /* recomp_types.h */
-        /* gerados na CI (weak: linka mesmo sem eles presentes) */
-        __attribute__((weak)) void dd_override_register_00ECB75D(void);
-        __attribute__((weak)) void dd_override_register_00869C50(void);
-        if (dd_override_register_00ECB75D) dd_override_register_00ECB75D();
-        if (dd_override_register_00869C50) dd_override_register_00869C50();
-        if (recomp_lookup(0x00ECB75Du)) {
-            fprintf(stderr, "[DesertDroid] boot no scrt real (override sub_00ECB75D)...\n");
-            uint32_t rc = hle_call_guest(0x00ECB75Du, 0, NULL);
-            fprintf(stderr, "[DesertDroid] fluxo principal retornou %u\n", rc);
-            return (int)rc;
-        }
-        fprintf(stderr, "[DesertDroid] override do scrt ausente — boot pelo entry do PE...\n");
-    }
+    /* Boot PELO ENTRY REAL do PE (sub_00ECC4DB: call cookie; jmp scrt —
+     * catalogado e limpo; as analises "adulteradas" eram offset manual
+     * errado de 0xC00). O trace grita cada etapa do scrt. */
     fprintf(stderr, "[DesertDroid] chamando entry (CRT -> WinMain)...\n");
 
     fprintf(stderr, "[DesertDroid] chamando entry (CRT -> WinMain)...\n");

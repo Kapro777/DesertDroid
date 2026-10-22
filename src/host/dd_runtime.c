@@ -101,8 +101,16 @@ void recomp_trace_enter(uint32_t va)
     g_trace_ring[g_trace_idx % DD_TRACE_RING] = va;
     g_trace_idx++;
     g_trace_total++;
-    if (va == 0x00869BF0u || va == 0x00869C50u)   /* WinMain (fronteira do catalogo + alvo do call do CRT) */
-        fprintf(stderr, "*** [WINMAIN] sub_%08X ALCANCADO! ***\n", va);
+    if (va == 0x0086A850u)      /* WinMain REAL (mapeamento correto) */
+        fprintf(stderr, "*** [WINMAIN] sub_0086A850 ALCANCADO! ***\n");
+    if (va == 0x00EDD9E7u)      fprintf(stderr, "*** [scrt] conversao da linha de comando (00EDD9E7)\n");
+    if (va == 0x00EDD92Cu)      fprintf(stderr, "*** [scrt] parse argv (00EDD92C)\n");
+    if (va == 0x00EDD6B4u)      fprintf(stderr, "*** [scrt] parse cmdline (00EDD6B4)\n");
+    if (va == 0x00ECCD14u)      fprintf(stderr, "*** [scrt] _initterm+checks (00ECCD14)\n");
+    if (va == 0x00EDD655u)      fprintf(stderr, "*** [scrt] pre-WinMain (00EDD655)\n");
+    if (va == 0x00ECCC55u)      fprintf(stderr, "*** [scrt] _amsg_exit! (00ECCC55) — um check FALHOU\n");
+    if (va == 0x00EDDB9Au)      fprintf(stderr, "*** [scrt] cookie init (00EDDB9A)\n");
+    if (va == 0x00ECC35Du)      fprintf(stderr, "*** [scrt] __scrt_common_main_seh (00ECC35D)\n");
     if (va >= 0x00401000u && va < 0x00EC0000u && g_trace_printed < 2000) {
         g_trace_printed++;
         fprintf(stderr, "[entry] sub_%08X\n", va);
