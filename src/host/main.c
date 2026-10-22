@@ -133,16 +133,15 @@ int main(int argc, char **argv)
     fprintf(stderr, "[DesertDroid] imagem mapeada, entry VA %#x\n",
             recomp_host_entry());
 
-    /* O entry do PE deste exe e' adulterado (SteamRIP: fragmento de 10 bytes,
-     * decode vaga e pula a chamada do WinMain). Boot nas FRONTeiras REAIS do
-     * catalogo (ver catalog_lookup.txt do run #25):
-     * cookie = sub_00EDCF0C; scrt = sub_00ECB6DF. */
+    /* O entry do PE deste exe e' adulterado (SteamRIP: fragmento de 10 bytes).
+     * Boot DIRETO no __scrt_common_main_seh (sub_00ECB6DF, fronteira real do
+     * catalogo): ele executa a sequencia completa na ordem certa (cookie no
+     * momento dele, per-thread data ANTES dos caches de FLS/DecodePointer —
+     * nao pre-chamar nada). */
     {
         extern uint32_t hle_call_guest(uint32_t va, int nargs, const uint32_t *args);
-        fprintf(stderr, "[DesertDroid] boot no CRT real "
-                "(cookie sub_00EDCF0C + scrt sub_00ECB6DF)...\n");
-        hle_call_guest(0x00EDCF0Cu, 0, NULL);            /* cookie    */
-        uint32_t rc = hle_call_guest(0x00ECB6DFu, 0, NULL); /* scrt_seh */
+        fprintf(stderr, "[DesertDroid] boot no CRT real (scrt sub_00ECB6DF)...\n");
+        uint32_t rc = hle_call_guest(0x00ECB6DFu, 0, NULL);
         fprintf(stderr, "[DesertDroid] fluxo principal retornou %u\n", rc);
         return (int)rc;
     }
