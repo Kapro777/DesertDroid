@@ -1,0 +1,9 @@
+# overrides.txt — VAs cujo corpo liftado e' substituido por um stub que
+# encaminha para recomp_lookup_manual em runtime (ver tools/run_lift.py).
+# Formato: <VA-hex> <comentario>
+#
+# _initterm wrapper: o tail original chama um callback de terminacao
+# ([0x1271A94]) registrado durante os construtores, que dispara exit(0)
+# antes do WinMain. O override DesertDroid (dd_crt_override.c) roda o
+# _initterm REAL via hle_call_guest e pula esse callback.
+00ECCD14 wrapper _initterm (skip callback exit pre-WinMain)
