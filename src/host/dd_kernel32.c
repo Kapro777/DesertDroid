@@ -235,6 +235,12 @@ static void k_GetUserNameA(void)
     RET(1, 2);
 }
 
+/* EncodePointer/DecodePointer: identidade (sem ASLR no modelo flat do
+ * guest, encodar e' devolver o mesmo ponteiro). O CRT VS2008 procura os
+ * dois via GetProcAddress e CHAMA o que achar — NULL = crash depois. */
+static void k_EncodePointer(void) { RETP(A32(0), 1); }
+static void k_DecodePointer(void) { RETP(A32(0), 1); }
+
 /* IsProcessorFeaturePresent(n) — via GetProcAddress; coerente com o CPUID */
 static void k_IsProcessorFeaturePresent(void)
 {
@@ -270,6 +276,13 @@ static const win32hle_shim dd_shims_kernel32[] = {
     { "SHGetFolderPathA",        k_SHGetFolderPathA },
     { "GetUserNameA",            k_GetUserNameA },
     { "IsProcessorFeaturePresent", k_IsProcessorFeaturePresent },
+    { "EncodePointer",           k_EncodePointer },
+    { "DecodePointer",           k_DecodePointer },
+    /* FLS = TLS no nosso modelo (o CRT VS2008 procura via GetProcAddress) */
+    { "FlsAlloc",                k_TlsAlloc },
+    { "FlsFree",                 k_TlsFree },
+    { "FlsGetValue",             k_TlsGetValue },
+    { "FlsSetValue",             k_TlsSetValue },
     { "TerminateProcess",        k_TerminateProcess },
     { "GetModuleHandleW",        k_GetModuleHandleW },
     { "SetEnvironmentVariableA",  k_SetEnvironmentVariableA },
