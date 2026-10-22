@@ -77,8 +77,8 @@ void recomp_trace_enter(uint32_t va)
     g_trace_ring[g_trace_idx % DD_TRACE_RING] = va;
     g_trace_idx++;
     g_trace_total++;
-    if (va == 0x00869C50u)   /* WinMain do FNV (via xref do CRT) */
-        fprintf(stderr, "*** [WINMAIN] sub_00869C50 ALCANCADO! ***\n");
+    if (va == 0x00869BF0u || va == 0x00869C50u)   /* WinMain (fronteira do catalogo + alvo do call do CRT) */
+        fprintf(stderr, "*** [WINMAIN] sub_%08X ALCANCADO! ***\n", va);
     if (va >= 0x00401000u && va < 0x00EC0000u && g_trace_printed < 2000) {
         g_trace_printed++;
         fprintf(stderr, "[entry] sub_%08X\n", va);
