@@ -132,6 +132,21 @@ int main(int argc, char **argv)
 
     fprintf(stderr, "[DesertDroid] imagem mapeada, entry VA %#x\n",
             recomp_host_entry());
+
+    /* O entry do PE deste exe e' adulterado (SteamRIP: mid-instruction,
+     * decode vaga e pula a chamada do WinMain). Boot no fluxo real do CRT:
+     * 0xECB8DB = __security_init_cookie() + jmp __scrt_common_main_seh —
+     * a sequencia exata de WinMainCRTStartup, verificada por xref local. */
+    #define DD_REAL_ENTRY 0x00ECB8DBu
+    {
+        extern uint32_t hle_call_guest(uint32_t va, int nargs, const uint32_t *args);
+        fprintf(stderr, "[DesertDroid] boot no CRT real (sub_%08X)...\n",
+                DD_REAL_ENTRY);
+        uint32_t rc = hle_call_guest(DD_REAL_ENTRY, 0, NULL);
+        fprintf(stderr, "[DesertDroid] fluxo principal retornou %u\n", rc);
+        return (int)rc;
+    }
+
     fprintf(stderr, "[DesertDroid] chamando entry (CRT -> WinMain)...\n");
 
     uint32_t rc = recomp_host_run();
