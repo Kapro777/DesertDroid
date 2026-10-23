@@ -1,0 +1,34 @@
+From cdfb04df8ec93a8e2bcd0cb9cb1d516ec980e759 Mon Sep 17 00:00:00 2001
+From: tiny <tiny@localhost>
+Date: Fri, 23 Oct 2026 13:36:06 -0400
+Subject: [PATCH] =?UTF-8?q?host=5Flite:=20hook=20dd=5Fon=5Ftib=5Fready=20(?=
+ =?UTF-8?q?weak)=20na=20criacao=20do=20TIB=20=E2=80=94=20host=20pode=20pre?=
+ =?UTF-8?q?encher=20TLS=20estatico=20em=20fs:[0x2C]?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ runtime/win32hle/host_lite.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/runtime/win32hle/host_lite.c b/runtime/win32hle/host_lite.c
+index 8bbf336..4f7b123 100644
+--- a/runtime/win32hle/host_lite.c
++++ b/runtime/win32hle/host_lite.c
+@@ -90,6 +90,12 @@ static uint32_t make_tib(uint32_t lo, uint32_t hi) {
+     t[1]        = hi;                          /* StackBase                   */
+     t[2]        = lo;                          /* StackLimit                  */
+     t[0x18/4]   = tva;                         /* Self (fs:[0x18])            */
++    /* TLS estatico (DesertDroid patch 0022): o host preenche fs:[0x2C] */
++    t[0x2C/4]   = 0;
++    {
++        extern void dd_on_tib_ready(uint32_t tib_va) __attribute__((weak));
++        if (dd_on_tib_ready) dd_on_tib_ready(tva);
++    }
+     return tva;
+ }
+ 
+-- 
+2.47.3
+
