@@ -48,10 +48,15 @@ static void dd_crash(int sig, siginfo_t *si, void *ctx)
     fprintf(stderr, "  esp=%08X ebp=%08X esi=%08X edi=%08X\n",
             g_esp, g_ebp, g_esi, g_edi);
     {
+        /* leitura SEGURA: ebp pode ser lixo (1) — validar antes de ler */
         extern uint32_t dd_mem32(uint32_t va);
+        #define SAFE32(va) (((va) >= 0x1000u && (va) < 0xF0000000u) ? dd_mem32(va) : 0xDEADBEEFu)
         fprintf(stderr, "  pilha: [ebp+8]=%#x [ebp+C]=%#x [ebp+10]=%#x [ebp+14]=%#x [ebp+18]=%#x\n",
-                dd_mem32(g_ebp + 8), dd_mem32(g_ebp + 0xC), dd_mem32(g_ebp + 0x10),
-                dd_mem32(g_ebp + 0x14), dd_mem32(g_ebp + 0x18));
+                SAFE32(g_ebp + 8), SAFE32(g_ebp + 0xC), SAFE32(g_ebp + 0x10),
+                SAFE32(g_ebp + 0x14), SAFE32(g_ebp + 0x18));
+        fprintf(stderr, "  frame local: [ebp-14]=%#x [ebp-10]=%#x [ebp-C]=%#x [ebp-8]=%#x [ebp-4]=%#x\n",
+                SAFE32(g_ebp - 0x14), SAFE32(g_ebp - 0x10), SAFE32(g_ebp - 0xC),
+                SAFE32(g_ebp - 0x8), SAFE32(g_ebp - 0x4));
     }
     fprintf(stderr, "  (mapear sub_XXXXXX em work/names.json ou no catalogo)\n");
     {
