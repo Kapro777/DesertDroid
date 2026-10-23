@@ -37,7 +37,11 @@ static void dd_ovr_00ECCD14(void)
     }
     fprintf(stderr, "[DesertDroid] _initterm completou; pulando o callback "
                     "de terminacao [0x1271A94] (exit pre-WinMain)\n");
-    g_eax = 0;                                  /* "xor eax,eax; ret"      */
+    /* O check do scrt (0xecc445) compara eax com esi. Retorna g_esi:
+     * igual-com-igual passa por construcao, qualquer que seja o valor. */
+    extern uint32_t g_esi;
+    g_eax = g_esi;
+    fprintf(stderr, "[DesertDroid] override retorna eax=esi=%#x\n", g_esi);
 }
 
 static void dd_ovr_00ED0F17(void)
