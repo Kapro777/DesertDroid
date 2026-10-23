@@ -108,7 +108,12 @@ void recomp_trace_enter(uint32_t va)
     if (va == 0x00EDD6B4u)      fprintf(stderr, "*** [scrt] parse cmdline (00EDD6B4)\n");
     if (va == 0x00ECCD14u)      fprintf(stderr, "*** [scrt] _initterm+checks (00ECCD14)\n");
     if (va == 0x00EDD655u)      fprintf(stderr, "*** [scrt] pre-WinMain (00EDD655)\n");
-    if (va == 0x00ECCC55u)      fprintf(stderr, "*** [scrt] _amsg_exit! (00ECCC55) — um check FALHOU\n");
+    if (va == 0x00ECCC55u) {
+        extern uint32_t g_esp, g_eax, g_esi;
+        extern uint32_t dd_mem32(uint32_t va);
+        fprintf(stderr, "*** [scrt] _amsg_exit! (00ECCC55) — code=%u (arg da pilha), eax=%#x esi=%#x\n",
+                dd_mem32(g_esp + 4), g_eax, g_esi);
+    }
     if (va == 0x00EDDB9Au)      fprintf(stderr, "*** [scrt] cookie init (00EDDB9A)\n");
     if (va == 0x00ECC35Du)      fprintf(stderr, "*** [scrt] __scrt_common_main_seh (00ECC35D)\n");
     if (va >= 0x00401000u && va < 0x00EC0000u && g_trace_printed < 2000) {
@@ -123,4 +128,10 @@ int  recomp_trace_arg(int argc, char **argv, int i)
 {
     (void)argc; (void)argv;
     return i;
+}
+
+/* leitura direta de memoria guest (modelo flat) para diagnostico */
+uint32_t dd_mem32(uint32_t va)
+{
+    return *(uint32_t *)(uintptr_t)va;
 }
