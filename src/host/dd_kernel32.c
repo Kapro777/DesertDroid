@@ -344,6 +344,14 @@ static void k_ResetEvent(void)          { RET(1, 1); }
 static void k_WaitForSingleObject(void) { RET(0, 2); }       /* WAIT_OBJECT_0 */
 static void k_WaitForMultipleObjects(void) { RET(0, 4); }
 
+/* ---- prioridades/controle de threads (workers do MM) ---- */
+static void k_SetThreadPriority(void)    { RET(1, 2); }
+static void k_GetThreadPriority(void)    { RET(2, 1); }   /* THREAD_PRIORITY_NORMAL */
+static void k_SetThreadIdealProcessor(void) { RET(0, 2); }
+static void k_ResumeThread(void)         { RET(1, 1); }   /* prev suspend = 0 */
+static void k_SuspendThread(void)        { RET(0, 1); }
+static void k_GetExitCodeThread(void)    { *(uint32_t *)APTR(1) = 0u; /* STILL_ACTIVE */ RET(1, 2); }
+
 static const win32hle_shim dd_shims_kernel32[] = {
     { "GetSystemTimeAsFileTime", k_GetSystemTimeAsFileTime },
     { "QueryPerformanceCounter", k_QueryPerformanceCounter },
@@ -383,6 +391,12 @@ static const win32hle_shim dd_shims_kernel32[] = {
     { "ResetEvent",            k_ResetEvent },
     { "WaitForSingleObject",   k_WaitForSingleObject },
     { "WaitForMultipleObjects", k_WaitForMultipleObjects },
+    { "SetThreadPriority",     k_SetThreadPriority },
+    { "GetThreadPriority",     k_GetThreadPriority },
+    { "SetThreadIdealProcessor", k_SetThreadIdealProcessor },
+    { "ResumeThread",         k_ResumeThread },
+    { "SuspendThread",        k_SuspendThread },
+    { "GetExitCodeThread",     k_GetExitCodeThread },
     { "IsProcessorFeaturePresent", k_IsProcessorFeaturePresent },
     { "EncodePointer",           k_EncodePointer },
     { "DecodePointer",           k_DecodePointer },
