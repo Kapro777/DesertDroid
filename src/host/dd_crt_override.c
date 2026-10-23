@@ -65,9 +65,27 @@ static void dd_ovr_00ED0F17(void)
     g_eax = ptd;                                 /* 0 = quem chama decide  */
 }
 
+/* sub_00A5B5A0: format/get-string por ID no TLS do jogo. O MM chama com
+ * (buffer_dest, id). Sem o string-manager inicializado (init que nao roda
+ * no nosso caminho), o original crasha 4 niveis abaixo. Resposta util:
+ * string vazia no buffer (caller usa o conteudo) + buffer como retorno. */
+static void dd_ovr_00A5B5A0(void)
+{
+    extern uint32_t dd_mem32(uint32_t va);
+    extern uint32_t g_esp;
+    uint32_t buf = dd_mem32(g_esp + 4);
+    uint32_t id  = dd_mem32(g_esp + 8);
+    if (buf)
+        *(uint32_t *)(uintptr_t)buf = 0;         /* "" no buffer destino */
+    fprintf(stderr, "[DesertDroid] format-string id=%u -> \"\" (buffer %#x)\n",
+            id, buf);
+    g_eax = buf;                                 /* retorno = buffer */
+}
+
 void dd_crt_overrides_register(void)
 {
     dd_overrides_add(0x00ECCD14u, dd_ovr_00ECCD14);
+    dd_overrides_add(0x00A5B5A0u, dd_ovr_00A5B5A0);
     fprintf(stderr, "[DesertDroid] overrides CRT registrados "
-            "(00ECCD14 _initterm)\n");
+            "(00ECCD14 _initterm, 00A5B5A0 format-string)\n");
 }

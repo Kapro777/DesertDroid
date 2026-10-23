@@ -8,3 +8,4 @@
 # pre-WinMain. O override roda o _initterm REAL via hle_call_guest e pula o
 # callback (dd_crt_override.c).
 00ECCD14 wrapper _initterm (skip callback exit pre-WinMain)
+00A5B5A0 format-string (buffer, id) — string vazia + buffer como retorno
