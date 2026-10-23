@@ -293,6 +293,40 @@ static void k_CreateMutexA(void)
 }
 static void k_ReleaseMutex(void) { RET(1, 1); }
 
+/* ---- metricas de tela (init de video do WinMain) ----
+ * Tela virtual: 1280x720, 32bpp, 96dpi. */
+static void k_GetSystemMetrics(void)
+{
+    uint32_t n = A32(0);
+    uint32_t v;
+    switch (n) {
+    case 0:  v = 1280; break;   /* SM_CXSCREEN      */
+    case 1:  v = 720;  break;   /* SM_CYSCREEN      */
+    case 2:  v = 1280; break;   /* SM_CXFULLSCREEN  */
+    case 3:  v = 720;  break;   /* SM_CYFULLSCREEN  */
+    case 15: v = 112;  break;   /* SM_CYCAPTION     */
+    case 21: v = 1;    break;   /* SM_MOUSEPRESENT  */
+    default: v = 0;    break;
+    }
+    RET(v, 1);
+}
+
+static void k_GetDeviceCaps(void)
+{
+    uint32_t n = A32(1);
+    uint32_t v;
+    switch (n) {
+    case 8:  v = 1280; break;   /* HORZRES      */
+    case 10: v = 720;  break;   /* VERTRES      */
+    case 12: v = 32;   break;   /* BITSPIXEL    */
+    case 14: v = 1;    break;   /* PLANES       */
+    case 88: v = 96;   break;   /* LOGPIXELSX   */
+    case 90: v = 96;   break;   /* LOGPIXELSY   */
+    default: v = 0;    break;
+    }
+    RET(v, 2);
+}
+
 static const win32hle_shim dd_shims_kernel32[] = {
     { "GetSystemTimeAsFileTime", k_GetSystemTimeAsFileTime },
     { "QueryPerformanceCounter", k_QueryPerformanceCounter },
@@ -319,6 +353,8 @@ static const win32hle_shim dd_shims_kernel32[] = {
     { "GetUserNameA",            k_GetUserNameA },
     { "CreateMutexA",            k_CreateMutexA },
     { "ReleaseMutex",            k_ReleaseMutex },
+    { "GetSystemMetrics",       k_GetSystemMetrics },
+    { "GetDeviceCaps",          k_GetDeviceCaps },
     { "IsProcessorFeaturePresent", k_IsProcessorFeaturePresent },
     { "EncodePointer",           k_EncodePointer },
     { "DecodePointer",           k_DecodePointer },
