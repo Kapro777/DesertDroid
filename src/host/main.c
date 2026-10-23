@@ -145,6 +145,16 @@ int main(int argc, char **argv)
     fprintf(stderr, "[DesertDroid] imagem mapeada, entry VA %#x\n",
             recomp_host_entry());
 
+    /* buffer estatico do jogo ([0x11F42C0]): o jogo le pool+0x2080 como
+     * string (A5B690). Sem isso o format id=3 crasha 4 niveis abaixo.
+     * NAO e' inicializado por nenhum codigo do exe — vem do estado do
+     * loader que nos nao replicamos (72KB zerados bastam p/ strlen=0). */
+    {
+        extern uint32_t guest_alloc(size_t size);
+        *(uint32_t *)(uintptr_t)0x11F42C0u = guest_alloc(0x10000);
+        fprintf(stderr, "[DesertDroid] buffer estatico 0x11F42C0 pre-alocado\n");
+    }
+
     /* buffer estatico do jogo ([0x11F42C0]): o ctor que o aloca
      * (sub_00A5AA20) nao roda no nosso caminho de boot; pre-alocamos
      * zerado (a imagem ja esta mapeada aqui) — o consumidor le vazio. */
