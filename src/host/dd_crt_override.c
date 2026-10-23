@@ -70,9 +70,9 @@ static void dd_ovr_00A5B5A0(void)
     extern uint32_t dd_mem32(uint32_t va);
     extern uint32_t g_esp;
     fprintf(stderr, "[DesertDroid] override 00A5B5A0 (format-string): "
-            "args [%#x, %#x] -> indisponivel\n",
+            "args [%#x, %#x] -> indisponivel (-1)\n",
             dd_mem32(g_esp + 4), dd_mem32(g_esp + 8));
-    g_eax = 0;                                  /* "sem string" — caller trata */
+    g_eax = 0xFFFFFFFFu;                        /* -1: o mesmo "vazio" do A5B4B0 */
 }
 
 void dd_crt_overrides_register(void)
