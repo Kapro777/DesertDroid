@@ -262,8 +262,16 @@ static void k_GetUserNameA(void)
 /* EncodePointer/DecodePointer: identidade (sem ASLR no modelo flat do
  * guest, encodar e' devolver o mesmo ponteiro). O CRT VS2008 procura os
  * dois via GetProcAddress e CHAMA o que achar — NULL = crash depois. */
-static void k_EncodePointer(void) { RETP(A32(0), 1); }
-static void k_DecodePointer(void) { RETP(A32(0), 1); }
+static void k_EncodePointer(void) {
+    uint32_t v = A32(0);
+    fprintf(stderr, "[enc] EncodePointer(%#x)\n", v);
+    RETP(v, 1);
+}
+static void k_DecodePointer(void) {
+    uint32_t v = A32(0);
+    fprintf(stderr, "[enc] DecodePointer(%#x)%s\n", v, v == 0 ? "   <<== NULL (fast path vai pro fallback)" : "");
+    RETP(v, 1);
+}
 
 /* IsProcessorFeaturePresent(n) — via GetProcAddress; coerente com o CPUID */
 static void k_IsProcessorFeaturePresent(void)

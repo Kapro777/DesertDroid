@@ -64,7 +64,6 @@ static void dd_ovr_00ED0F17(void)
 void dd_crt_overrides_register(void)
 {
     dd_overrides_add(0x00ECCD14u, dd_ovr_00ECCD14);
-    dd_overrides_add(0x00ED0F17u, dd_ovr_00ED0F17);
     fprintf(stderr, "[DesertDroid] overrides CRT registrados "
-            "(00ECCD14 _initterm, 00ED0F17 get-ptd)\n");
+            "(00ECCD14 _initterm)\n");
 }
