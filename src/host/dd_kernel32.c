@@ -334,6 +334,16 @@ static void k_GetDeviceCaps(void)
     RET(v, 2);
 }
 
+/* ---- sincronizacao (memory manager BGS: semaforos/eventos/waits) ----
+ * Semantica "tudo bem, prossiga": handles fake, waits retornam sucesso. */
+static void k_CreateSemaphoreA(void)    { RET(0x00D0D002u, 4); }
+static void k_ReleaseSemaphore(void)    { RET(1, 3); }
+static void k_CreateEventA(void)        { RET(0x00D0D003u, 4); }
+static void k_SetEvent(void)            { RET(1, 1); }
+static void k_ResetEvent(void)          { RET(1, 1); }
+static void k_WaitForSingleObject(void) { RET(0, 2); }       /* WAIT_OBJECT_0 */
+static void k_WaitForMultipleObjects(void) { RET(0, 4); }
+
 static const win32hle_shim dd_shims_kernel32[] = {
     { "GetSystemTimeAsFileTime", k_GetSystemTimeAsFileTime },
     { "QueryPerformanceCounter", k_QueryPerformanceCounter },
@@ -366,6 +376,13 @@ static const win32hle_shim dd_shims_kernel32[] = {
     { "IsWindow",              k_IsWindow },
     { "IsIconic",              k_IsIconic },
     { "GetForegroundWindow",   k_GetForegroundWindow },
+    { "CreateSemaphoreA",      k_CreateSemaphoreA },
+    { "ReleaseSemaphore",      k_ReleaseSemaphore },
+    { "CreateEventA",          k_CreateEventA },
+    { "SetEvent",              k_SetEvent },
+    { "ResetEvent",            k_ResetEvent },
+    { "WaitForSingleObject",   k_WaitForSingleObject },
+    { "WaitForMultipleObjects", k_WaitForMultipleObjects },
     { "IsProcessorFeaturePresent", k_IsProcessorFeaturePresent },
     { "EncodePointer",           k_EncodePointer },
     { "DecodePointer",           k_DecodePointer },
