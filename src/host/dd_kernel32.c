@@ -143,14 +143,26 @@ static void k_TlsAlloc(void)
         uint32_t bit = 1u << i;
         if (!(g_tls_used & bit) && !(__sync_fetch_and_or(&g_tls_used, bit) & bit)) {
             g_tls_vals[i] = 0;
+            fprintf(stderr, "[tls] TlsAlloc -> %d\n", i);
             RET((uint32_t)i, 0);
         }
     }
+    fprintf(stderr, "[tls] TlsAlloc -> ES GOTOU (64 slots)\n");
     RET(0xFFFFFFFFu, 0);   /* TLS_OUT_OF_INDEXES */
 }
-static void k_TlsFree(void)  { __sync_fetch_and_and(&g_tls_used, ~(1u << A32(0))); RET(1, 1); }
-static void k_TlsGetValue(void) { RET(g_tls_vals[A32(0) & (DD_TLS_SLOTS - 1)], 1); }
-static void k_TlsSetValue(void) { g_tls_vals[A32(0) & (DD_TLS_SLOTS - 1)] = A32(1); RET(1, 2); }
+static void k_TlsFree(void)  { fprintf(stderr, "[tls] TlsFree(%#x)\n", A32(0)); __sync_fetch_and_and(&g_tls_used, ~(1u << (A32(0) & 63))); RET(1, 1); }
+static void k_TlsGetValue(void) {
+    uint32_t idx = A32(0);
+    uint32_t v = (idx < DD_TLS_SLOTS) ? g_tls_vals[idx] : 0;
+    fprintf(stderr, "[tls] TlsGetValue(%u) -> %#x%s\n", idx, v, idx >= DD_TLS_SLOTS ? "  << INDICE > 63!" : "");
+    RET(v, 1);
+}
+static void k_TlsSetValue(void) {
+    uint32_t idx = A32(0), val = A32(1);
+    fprintf(stderr, "[tls] TlsSetValue(%u, %#x)%s\n", idx, val, idx >= DD_TLS_SLOTS ? "  << INDICE > 63!" : "");
+    if (idx < DD_TLS_SLOTS) g_tls_vals[idx] = val;
+    RET(1, 2);
+}
 
 /* ---- heap/handle ---- */
 static void k_HeapCreate(void) { RET(0x00D0D000u, 3); }   /* handle fake       */
