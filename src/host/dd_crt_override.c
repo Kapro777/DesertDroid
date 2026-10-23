@@ -65,20 +65,9 @@ static void dd_ovr_00ED0F17(void)
     g_eax = ptd;                                 /* 0 = quem chama decide  */
 }
 
-static void dd_ovr_00A5B5A0(void)
-{
-    extern uint32_t dd_mem32(uint32_t va);
-    extern uint32_t g_esp;
-    fprintf(stderr, "[DesertDroid] override 00A5B5A0 (format-string): "
-            "args [%#x, %#x] -> indisponivel (-1)\n",
-            dd_mem32(g_esp + 4), dd_mem32(g_esp + 8));
-    g_eax = 0xFFFFFFFFu;                        /* -1: o mesmo "vazio" do A5B4B0 */
-}
-
 void dd_crt_overrides_register(void)
 {
     dd_overrides_add(0x00ECCD14u, dd_ovr_00ECCD14);
-    dd_overrides_add(0x00A5B5A0u, dd_ovr_00A5B5A0);
     fprintf(stderr, "[DesertDroid] overrides CRT registrados "
-            "(00ECCD14 _initterm, 00A5B5A0 format-string)\n");
+            "(00ECCD14 _initterm)\n");
 }

@@ -36,11 +36,8 @@ void dd_on_tib_ready(uint32_t tib_va)
     uint32_t block_size = raw_size + tls->zero_fill;
     uint32_t block = guest_alloc(block_size ? block_size : 4);
     memcpy(guest_ptr(block), (void *)(uintptr_t)tls->start_va, raw_size);
-    /* slot +0x2B4: variavel __declspec(thread) do jogo — um objeto
-     * formatter de strings por thread (sub_00A5B5A0 le e repassa
-     * como ponteiro; zero vira NULL deref tres niveis abaixo). */
-    if (block_size >= 0x2B8)
-        *(uint32_t *)guest_ptr(block + 0x2B4) = guest_alloc(0x2000);
+    /* NOTA: nao preencher slots do jogo aqui — o A5B4B0 trata pointer
+     * NULL graciosamente (ret -1); objeto zerado nao-NULL e que crasha. */
     /* array de TLS: 64 slots; o exe e o primeiro modulo -> indice 0 */
     uint32_t array = guest_alloc(4u * 64u);
     memset(guest_ptr(array), 0, 4u * 64u);
