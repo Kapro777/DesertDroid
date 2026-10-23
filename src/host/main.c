@@ -28,6 +28,7 @@ void dd_fs_register(void);
 void dd_d3d9_register(void);
 void dd_dynload_register(void);
 void dd_crt_overrides_register(void);
+void dd_threads_register(void);
 void dd_overrides_add(uint32_t va, recomp_func_t fn);
 void dd_fs_set_root(const char *host_dir);
 extern int win32hle_trace;   /* rastreamento de imports do proprio win32hle */
@@ -114,6 +115,7 @@ int main(int argc, char **argv)
     dd_dynload_register(); /* GetProcAddress de verdade                    */
     dd_d3d9_register();     /* Direct3DCreate9 + COM HLE auto-anunciante    */
     dd_crt_overrides_register(); /* _initterm sem o callback assassino     */
+    dd_threads_register();      /* CreateThread/ExitThread (MM workers)   */
 
     /* raiz de arquivos = pasta do exe do usuario (BYOG) */
     {
