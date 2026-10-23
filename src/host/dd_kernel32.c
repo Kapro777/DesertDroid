@@ -283,6 +283,16 @@ static void k_IsProcessorFeaturePresent(void)
     RET(f < 32 && (supported & (1u << f)) ? 1u : 0u, 1);
 }
 
+/* ---- mutex/handles (check de instancia unica do WinMain Bethesda) ---- */
+static void k_CreateMutexA(void)
+{
+    /* (attrs, name, owner) — "mutex nao existe" = primeira instancia */
+    fprintf(stderr, "[DesertDroid] CreateMutexA(\"%s\") — primeira instancia\n",
+            (const char *)APTR(1) ? (const char *)APTR(1) : "(sem nome)");
+    RET(0x00D0D001u, 3);      /* handle fake   */
+}
+static void k_ReleaseMutex(void) { RET(1, 1); }
+
 static const win32hle_shim dd_shims_kernel32[] = {
     { "GetSystemTimeAsFileTime", k_GetSystemTimeAsFileTime },
     { "QueryPerformanceCounter", k_QueryPerformanceCounter },
@@ -307,6 +317,8 @@ static const win32hle_shim dd_shims_kernel32[] = {
     { "timeGetTime",             k_timeGetTime },
     { "SHGetFolderPathA",        k_SHGetFolderPathA },
     { "GetUserNameA",            k_GetUserNameA },
+    { "CreateMutexA",            k_CreateMutexA },
+    { "ReleaseMutex",            k_ReleaseMutex },
     { "IsProcessorFeaturePresent", k_IsProcessorFeaturePresent },
     { "EncodePointer",           k_EncodePointer },
     { "DecodePointer",           k_DecodePointer },
