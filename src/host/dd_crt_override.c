@@ -93,10 +93,35 @@ static void dd_ovr_00A5B5A0(void)
     g_eax = buf;                                 /* retorno = buffer */
 }
 
+/* ---- rotinas de memoria do CRT substituidas por nativas do host ----
+ * O memset liftado (00EC61C0) tem um tail-jmp (jmp 0xed2cd5) cujo frame
+ * e o suspeito do desalinhamento (ebx=DEAD0000 = RETADDR vazado). As
+ * operacoes sao triviais no host — mais rapidas e sem risco de lifter. */
+static void dd_ovr_memset(void)
+{
+    extern uint32_t g_esp;
+    extern uint32_t dd_mem32(uint32_t va);
+    uint32_t dst = dd_mem32(g_esp + 4), c = dd_mem32(g_esp + 8),
+             n = dd_mem32(g_esp + 0xC);
+    memset((void *)(uintptr_t)dst, (int)c, (size_t)n);
+    g_eax = dst;
+}
+static void dd_ovr_memcpy(void)
+{
+    extern uint32_t g_esp;
+    extern uint32_t dd_mem32(uint32_t va);
+    uint32_t dst = dd_mem32(g_esp + 4), src = dd_mem32(g_esp + 8),
+             n = dd_mem32(g_esp + 0xC);
+    memmove((void *)(uintptr_t)dst, (const void *)(uintptr_t)src, (size_t)n);
+    g_eax = dst;
+}
+
 void dd_crt_overrides_register(void)
 {
     dd_overrides_add(0x00ECCD14u, dd_ovr_00ECCD14);
     dd_overrides_add(0x00A5B5A0u, dd_ovr_00A5B5A0);
+    dd_overrides_add(0x00EC61C0u, dd_ovr_memset);   /* memset do CRT  */
+    dd_overrides_add(0x00EC44D0u, dd_ovr_memcpy);   /* memmove        */
     fprintf(stderr, "[DesertDroid] overrides CRT registrados "
-            "(00ECCD14 _initterm, 00A5B5A0 format-string)\n");
+            "(00ECCD14, 00A5B5A0, memset/memcpy nativos)\n");
 }
