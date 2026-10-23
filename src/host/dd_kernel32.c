@@ -295,6 +295,13 @@ static void k_ReleaseMutex(void) { RET(1, 1); }
 
 /* ---- metricas de tela (init de video do WinMain) ----
  * Tela virtual: 1280x720, 32bpp, 96dpi. */
+/* ---- janelas: a historia e "nenhuma janela existe ainda" ----
+ * O jogo pergunta por janelas existentes antes de criar a propria. */
+static void k_FindWindowA(void)   { RET(0, 2); }   /* nao achou */
+static void k_IsWindow(void)      { RET(0, 1); }   /* nao e janela */
+static void k_IsIconic(void)     { RET(0, 1); }
+static void k_GetForegroundWindow(void) { RET(0, 0); }
+
 static void k_GetSystemMetrics(void)
 {
     uint32_t n = A32(0);
@@ -355,6 +362,10 @@ static const win32hle_shim dd_shims_kernel32[] = {
     { "ReleaseMutex",            k_ReleaseMutex },
     { "GetSystemMetrics",       k_GetSystemMetrics },
     { "GetDeviceCaps",          k_GetDeviceCaps },
+    { "FindWindowA",           k_FindWindowA },
+    { "IsWindow",              k_IsWindow },
+    { "IsIconic",              k_IsIconic },
+    { "GetForegroundWindow",   k_GetForegroundWindow },
     { "IsProcessorFeaturePresent", k_IsProcessorFeaturePresent },
     { "EncodePointer",           k_EncodePointer },
     { "DecodePointer",           k_DecodePointer },
