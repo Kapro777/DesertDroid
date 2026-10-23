@@ -127,15 +127,6 @@ int main(int argc, char **argv)
         dd_fs_set_root(dirbuf);
     }
 
-    /* buffer estatico do jogo ([0x11F42C0]): o ctor que o aloca
-     * (sub_00A5AA20) nao roda no nosso caminho de boot; pre-alocamos
-     * zerado — o consumidor (sub_00A5B690) le string vazia e segue. */
-    {
-        extern uint32_t guest_alloc(size_t size);
-        *(uint32_t *)(uintptr_t)0x11F42C0u = guest_alloc(0x10000);
-        fprintf(stderr, "[DesertDroid] buffer estatico 0x11F42C0 pre-alocado\n");
-    }
-
     fprintf(stderr, "[DesertDroid] mapeando imagem: %s\n", argv[1]);
 
     /* boot permissivo: imports nao implementados viram stubs que se
@@ -147,6 +138,15 @@ int main(int argc, char **argv)
 
     fprintf(stderr, "[DesertDroid] imagem mapeada, entry VA %#x\n",
             recomp_host_entry());
+
+    /* buffer estatico do jogo ([0x11F42C0]): o ctor que o aloca
+     * (sub_00A5AA20) nao roda no nosso caminho de boot; pre-alocamos
+     * zerado (a imagem ja esta mapeada aqui) — o consumidor le vazio. */
+    {
+        extern uint32_t guest_alloc(size_t size);
+        *(uint32_t *)(uintptr_t)0x11F42C0u = guest_alloc(0x10000);
+        fprintf(stderr, "[DesertDroid] buffer estatico 0x11F42C0 pre-alocado\n");
+    }
 
     /* Boot PELO ENTRY REAL do PE (sub_00ECC4DB: call cookie; jmp scrt —
      * catalogado e limpo; as analises "adulteradas" eram offset manual
