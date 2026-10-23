@@ -42,10 +42,22 @@ static void dd_ovr_00ECCD14(void)
 
 static void dd_ovr_00ED0F17(void)
 {
-    uint32_t idx = *(uint32_t *)(uintptr_t)0x11C1CC0u;
-    uint32_t ptd = dd_tls_slot_value(idx);
-    fprintf(stderr, "[DesertDroid] override 00ED0F17: ptd via slot %u -> %#x\n",
-            idx, ptd);
+    /* O ptd e' o UNICO ponteiro na faixa da arena (0x50000000-0x68000000)
+     * nos slots TLS (run #33: slot 1 = 0x50401030 estavel). Scan semantico:
+     * nao dependo de qual global do CRT guarda o indice. */
+    extern uint32_t dd_tls_slots_snapshot(uint32_t *out, uint32_t n);
+    uint32_t vals[64];
+    uint32_t n = dd_tls_slots_snapshot(vals, 64);
+    uint32_t ptd = 0, slot = 0xFFFFFFFFu;
+    for (uint32_t i = 0; i < n; i++) {
+        if (vals[i] >= 0x50000000u && vals[i] < 0x68000000u) {
+            ptd = vals[i];
+            slot = i;
+            break;
+        }
+    }
+    fprintf(stderr, "[DesertDroid] override 00ED0F17: ptd slot %u -> %#x\n",
+            slot, ptd);
     g_eax = ptd;                                 /* 0 = quem chama decide  */
 }
 

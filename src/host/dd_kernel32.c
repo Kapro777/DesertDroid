@@ -169,6 +169,13 @@ uint32_t dd_tls_slot_value(uint32_t idx)
     return idx < DD_TLS_SLOTS ? g_tls_vals[idx] : 0;
 }
 
+uint32_t dd_tls_slots_snapshot(uint32_t *out, uint32_t n)
+{
+    uint32_t c = n < DD_TLS_SLOTS ? n : DD_TLS_SLOTS;
+    for (uint32_t i = 0; i < c; i++) out[i] = g_tls_vals[i];
+    return c;
+}
+
 /* ---- heap/handle ---- */
 static void k_HeapCreate(void) { RET(0x00D0D000u, 3); }   /* handle fake       */
 static void k_HeapSetInformation(void) { RET(1, 4); }     /* HeapSetInformation? nao importado; reserva */
