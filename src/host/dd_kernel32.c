@@ -6,6 +6,7 @@
  */
 #define _GNU_SOURCE
 #include <stdio.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <string.h>
 #include <time.h>
@@ -334,15 +335,120 @@ static void k_GetDeviceCaps(void)
     RET(v, 2);
 }
 
-/* ---- sincronizacao (memory manager BGS: semaforos/eventos/waits) ----
- * Semantica "tudo bem, prossiga": handles fake, waits retornam sucesso. */
-static void k_CreateSemaphoreA(void)    { RET(0x00D0D002u, 4); }
-static void k_ReleaseSemaphore(void)    { RET(1, 3); }
-static void k_CreateEventA(void)        { RET(0x00D0D003u, 4); }
-static void k_SetEvent(void)            { RET(1, 1); }
-static void k_ResetEvent(void)          { RET(1, 1); }
-static void k_WaitForSingleObject(void) { RET(0, 2); }       /* WAIT_OBJECT_0 */
-static void k_WaitForMultipleObjects(void) { RET(0, 4); }
+/* ---- sincronizacao REAL (workers devem ESPERAR trabalho) ----
+ * Semafaros/eventos com contagem e condvar nativo: o wait SOLTA o
+ * machine lock (mach_leave) antes de dormir — a thread principal
+ * continua — e re-adquire ao acordar. Sem isso os workers rodam
+ * soltos antes do init e deref estruturas vazias. */
+#define DD_SYNC_MAX 64
+typedef struct {
+    int used; int count;
+    pthread_mutex_t m;
+    pthread_cond_t  c;
+} dd_sync_t;
+static dd_sync_t g_sync[DD_SYNC_MAX];
+
+extern void mach_enter(void);
+extern void mach_leave(void);
+
+static uint32_t dd_sync_new(int initial)
+{
+    for (int i = 0; i < DD_SYNC_MAX; i++) {
+        uint32_t bit = 1u << (i % 32), word = i / 32;
+        static volatile uint32_t used[2];
+        if (!(used[word] & bit) && !(__sync_fetch_and_or(&used[word], bit) & bit)) {
+            pthread_mutex_init(&g_sync[i].m, NULL);
+            pthread_cond_init(&g_sync[i].c, NULL);
+            g_sync[i].used = 1;
+            g_sync[i].count = initial;
+            return 0x00D0D100u + (uint32_t)i;
+        }
+    }
+    return 0;
+}
+static dd_sync_t *dd_sync_from(uint32_t h)
+{
+    if (h < 0x00D0D100u || h >= 0x00D0D100u + DD_SYNC_MAX) return NULL;
+    dd_sync_t *s = &g_sync[h - 0x00D0D100u];
+    return s->used ? s : NULL;
+}
+
+static void k_CreateSemaphoreA(void)
+{
+    uint32_t h = dd_sync_new((int)A32(1));   /* (attrs, initial, max, name) */
+    fprintf(stderr, "[sync] CreateSemaphoreA(count=%u) -> %#x\n", A32(1), h);
+    RET(h, 4);
+}
+static void k_ReleaseSemaphore(void)
+{
+    dd_sync_t *s = dd_sync_from(A32(0));
+    if (s) {
+        pthread_mutex_lock(&s->m);
+        s->count += (int)A32(1);
+        pthread_cond_signal(&s->c);
+        pthread_mutex_unlock(&s->m);
+    }
+    if (A32(2)) *(uint32_t *)(uintptr_t)A32(2) = 0;   /* lpPrevious */
+    RET(1, 3);
+}
+static void k_CreateEventA(void)
+{
+    uint32_t h = dd_sync_new(0);             /* (attrs, manual, initial, name) */
+    fprintf(stderr, "[sync] CreateEventA -> %#x\n", h);
+    RET(h, 4);
+}
+static void k_SetEvent(void)
+{
+    dd_sync_t *s = dd_sync_from(A32(0));
+    if (s) {
+        pthread_mutex_lock(&s->m);
+        if (s->count == 0) s->count = 1;
+        pthread_cond_broadcast(&s->c);
+        pthread_mutex_unlock(&s->m);
+    }
+    RET(1, 1);
+}
+static void k_ResetEvent(void)
+{
+    dd_sync_t *s = dd_sync_from(A32(0));
+    if (s) {
+        pthread_mutex_lock(&s->m);
+        s->count = 0;
+        pthread_mutex_unlock(&s->m);
+    }
+    RET(1, 1);
+}
+static void k_WaitForSingleObject(void)
+{
+    dd_sync_t *s = dd_sync_from(A32(0));
+    if (!s) RET(0, 2);                       /* handle desconhecido: "sinalizado" */
+    mach_leave();                           /* solta o machine lock ao dormir */
+    pthread_mutex_lock(&s->m);
+    while (s->count == 0)
+        pthread_cond_wait(&s->c, &s->m);
+    s->count--;                             /* consome (semaforo/auto-event) */
+    pthread_mutex_unlock(&s->m);
+    mach_enter();
+    RET(0, 2);                              /* WAIT_OBJECT_0 */
+}
+static void k_WaitForMultipleObjects(void)
+{
+    /* espera o PRIMEIRO handle sincronizavel (o MM espera seu semaforo) */
+    uint32_t *handles = (uint32_t *)(uintptr_t)A32(1);
+    if (handles && A32(0) >= 1) {
+        dd_sync_t *s = dd_sync_from(handles[0]);
+        if (s) {
+            mach_leave();
+            pthread_mutex_lock(&s->m);
+            while (s->count == 0)
+                pthread_cond_wait(&s->c, &s->m);
+            s->count--;
+            pthread_mutex_unlock(&s->m);
+            mach_enter();
+        }
+    }
+    RET(0, 4);                              /* WAIT_OBJECT_0 (indice 0) */
+}
 
 /* ---- prioridades/controle de threads (workers do MM) ---- */
 static void k_SetThreadPriority(void)    { RET(1, 2); }
