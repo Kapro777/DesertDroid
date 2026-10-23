@@ -30,18 +30,29 @@ uint32_t dd_tls_slot_value(uint32_t idx);
 
 static void dd_ovr_00ECCD14(void)
 {
+    extern uint32_t dd_mem32(uint32_t va);
     fprintf(stderr, "[DesertDroid] override 00ECCD14: _initterm(xi)...\n");
     {
         const uint32_t args[2] = { XI_A, XI_Z };
         hle_call_guest(INITERM_VA, 2, args);   /* stdcall: push xi_z, xi_a */
     }
-    fprintf(stderr, "[DesertDroid] _initterm completou; pulando o callback "
-                    "de terminacao [0x1271A94] (exit pre-WinMain)\n");
-    /* O check do scrt (0xecc445) compara eax com esi. Retorna g_esi:
-     * igual-com-igual passa por construcao, qualquer que seja o valor. */
+    fprintf(stderr, "[DesertDroid] _initterm completou.\n");
+    /* callback [0x1271A94] registrado pelos ctors: init REAL do jogo
+     * (string pool etc.) — rodar com os args originais (0,2,0). O exit(0)
+     * que ele causava vinha DEPOIS do trabalho; a parte do exit nao nos
+     * concerne (nao chamamos a chain de exit — so a funcao dele). */
+    {
+        uint32_t cb = dd_mem32(0x1271A94u);
+        fprintf(stderr, "[DesertDroid] callback ctor [0x1271A94] = %#x\n", cb);
+        if (cb) {
+            const uint32_t cargs[3] = { 0u, 2u, 0u };
+            hle_call_guest(cb, 3, cargs);
+        }
+    }
+    fprintf(stderr, "[DesertDroid] callback concluido; seguindo pro scrt\n");
+    /* O check do scrt (0xecc445) compara eax com esi. Retorna g_esi. */
     extern uint32_t g_esi;
     g_eax = g_esi;
-    fprintf(stderr, "[DesertDroid] override retorna eax=esi=%#x\n", g_esi);
 }
 
 static void dd_ovr_00ED0F17(void)
