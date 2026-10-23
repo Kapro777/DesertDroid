@@ -47,6 +47,12 @@ static void dd_crash(int sig, siginfo_t *si, void *ctx)
             g_eax, g_ecx, g_edx, g_ebx);
     fprintf(stderr, "  esp=%08X ebp=%08X esi=%08X edi=%08X\n",
             g_esp, g_ebp, g_esi, g_edi);
+    {
+        extern uint32_t dd_mem32(uint32_t va);
+        fprintf(stderr, "  pilha: [ebp+8]=%#x [ebp+C]=%#x [ebp+10]=%#x [ebp+14]=%#x [ebp+18]=%#x\n",
+                dd_mem32(g_ebp + 8), dd_mem32(g_ebp + 0xC), dd_mem32(g_ebp + 0x10),
+                dd_mem32(g_ebp + 0x14), dd_mem32(g_ebp + 0x18));
+    }
     fprintf(stderr, "  (mapear sub_XXXXXX em work/names.json ou no catalogo)\n");
     {
         extern void dd_trace_dump(void);
