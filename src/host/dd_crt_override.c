@@ -37,11 +37,13 @@ static void dd_ovr_00ECCD14(void)
         hle_call_guest(INITERM_VA, 2, args);   /* stdcall: push xi_z, xi_a */
     }
     fprintf(stderr, "[DesertDroid] _initterm completou.\n");
-    /* VERDE (runs #60/#61/#63): heap/MM init manual NAO funciona — o
-     * heap init (00AA20E0) depende de init posterior que nosso caminho
-     * de boot nao alcanca. O crash do 00AA35A0 (pool MM) e' sintoma da
-     * bifurcacao: no boot natural, alguem chama o heap init entre os
-     * construtores e o WinMain — esse caller e' o proximo alvo. */
+    /* O heap init (00AA20E0) escreve [0x11F6118] (heap global) que o
+     * dispatcher 00AA3050 usa antes de chamar o MM init (00AA2020).
+     * Sem o heap, o dispatcher loopa infinitamente (run #65: 65468 calls!).
+     * Chamar UMA vez aqui — dentro do boot, pos-ctors, pre-scrt. */
+    fprintf(stderr, "[DesertDroid] init: heap Havok (00AA20E0) — 1x...\n");
+    hle_call_guest(0x00AA20E0u, 0, NULL);
+    fprintf(stderr, "[DesertDroid] heap init ok; seguindo pro scrt\n");
     /* O check do scrt (0xecc445) compara eax com esi. Retorna g_esi. */
     extern uint32_t g_esi;
     g_eax = g_esi;
