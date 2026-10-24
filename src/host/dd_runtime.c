@@ -101,6 +101,11 @@ void recomp_trace_enter(uint32_t va)
     g_trace_ring[g_trace_idx % DD_TRACE_RING] = va;
     g_trace_idx++;
     g_trace_total++;
+    /* heartbeat: a cada 1000 funcoes guest, reportar onde estamos */
+    if ((g_trace_total % 1000) == 0) {
+        fprintf(stderr, "[hb %u] sub_%08X\n", g_trace_total, va);
+        fflush(stderr);
+    }
     if (va == 0x0086A850u)      /* WinMain REAL (mapeamento correto) */
         fprintf(stderr, "*** [WINMAIN] sub_0086A850 ALCANCADO! ***\n");
     if (va == 0x00EDD9E7u)      fprintf(stderr, "*** [scrt] conversao da linha de comando (00EDD9E7)\n");
