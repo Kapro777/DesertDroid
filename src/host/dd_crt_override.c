@@ -37,13 +37,26 @@ static void dd_ovr_00ECCD14(void)
         hle_call_guest(INITERM_VA, 2, args);   /* stdcall: push xi_z, xi_a */
     }
     fprintf(stderr, "[DesertDroid] _initterm completou.\n");
-    /* O heap init (00AA20E0) escreve [0x11F6118] (heap global) que o
-     * dispatcher 00AA3050 usa antes de chamar o MM init (00AA2020).
-     * Sem o heap, o dispatcher loopa infinitamente (run #65: 65468 calls!).
-     * Chamar UMA vez aqui — dentro do boot, pos-ctors, pre-scrt. */
-    fprintf(stderr, "[DesertDroid] init: heap Havok (00AA20E0) — 1x...\n");
-    hle_call_guest(0x00AA20E0u, 0, NULL);
-    fprintf(stderr, "[DesertDroid] heap init ok; seguindo pro scrt\n");
+    /* Montar a cadeia do heap Havok DIRETAMENTE (sem chamar codigo guest
+     * — runs #60/61/63/65/66 provaram que inits manuais criam recursao).
+     * A cadeia que o jogo espera:
+     *   [0x11F6118] = container
+     *   [container] = heap_obj  (vtable 0x10A24FC — real, 8+ slots .text)
+     *   [container+4] = 1 (flag "initialized")
+     * O MM init (00AA2020, chamado pelo dispatcher 00AA3050) le
+     * [0x11F6118] via call 0x9FD0F0 (mov eax,[ecx]) e coloca o heap_obj
+     * como vtable do singleton [0x11F6080]. */
+    {
+        extern uint32_t guest_alloc(size_t size);
+        uint32_t heap_obj = guest_alloc(0x100);
+        *(uint32_t *)(uintptr_t)heap_obj = 0x010A24FCu;   /* vtable real   */
+        uint32_t container = guest_alloc(0x10);
+        *(uint32_t *)(uintptr_t)container = heap_obj;       /* -> heap_obj  */
+        *(uint8_t *)(uintptr_t)(container + 4) = 1;          /* initialized  */
+        *(uint32_t *)(uintptr_t)0x11F6118u = container;     /* global       */
+        fprintf(stderr, "[DesertDroid] heap Havok montado: container=%#x "
+                        "heap=%#x vtable=0x10A24FC\n", container, heap_obj);
+    }
     /* O check do scrt (0xecc445) compara eax com esi. Retorna g_esi. */
     extern uint32_t g_esi;
     g_eax = g_esi;
