@@ -114,28 +114,26 @@ static void dd_install_crash_report(void)
     sigaction(SIGABRT, &sa, NULL);
 }
 
-/* ---- sampler: a cada 1s, onde o guest esta? (profiler caseiro do boot) ---- */
-static volatile uint64_t g_sample_n;
-static void dd_sample(int sig)
+/* ---- monitor: thread separada que reporta onde o guest esta ---- */
+static volatile uint32_t g_mon_run = 1;
+static void *dd_monitor_thread(void *arg)
 {
-    (void)sig;
-    uint64_t n = ++g_sample_n;
-    fprintf(stderr, "[sample %llu] t=%llus funcao sub_%08X import=%s\n",
-            (unsigned long long)n, (unsigned long long)n,
-            g_cur_func, g_cur_import ? g_cur_import : "-");
+    (void)arg;
+    extern uint32_t g_cur_func;
+    extern const char *g_cur_import;
+    for (int i = 0; g_mon_run && i < 600; i++) {  /* max 600 = 60s x 10 */
+        usleep(100000);                            /* 100ms */
+        fprintf(stderr, "[mon %d] sub_%08X import=%s\n",
+                i, g_cur_func, g_cur_import ? g_cur_import : "-");
+    }
+    return NULL;
 }
 
 static void dd_install_sampler(void)
 {
-    struct sigaction sa;
-    sa.sa_handler = dd_sample;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART;
-    sigaction(SIGALRM, &sa, NULL);
-    struct itimerval it;
-    it.it_value.tv_sec = 0;    it.it_value.tv_usec = 100000;    /* 100 ms */
-    it.it_interval.tv_sec = 0; it.it_interval.tv_usec = 100000;
-    setitimer(ITIMER_REAL, &it, NULL);
+    pthread_t t;
+    pthread_create(&t, NULL, dd_monitor_thread, NULL);
+    pthread_detach(t);
 }
 
 int main(int argc, char **argv)
