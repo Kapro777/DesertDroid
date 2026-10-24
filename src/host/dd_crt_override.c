@@ -37,13 +37,15 @@ static void dd_ovr_00ECCD14(void)
         hle_call_guest(INITERM_VA, 2, args);   /* stdcall: push xi_z, xi_a */
     }
     fprintf(stderr, "[DesertDroid] _initterm completou.\n");
-    /* Inicializacao do heap Havok (sub_00AA20E0) — o init do MM singleton
-     * (sub_00AA2020, que roda no fluxo normal) le [0x11F6118], que so e'
-     * preenchido por este init. Sem ele, a vtable do MM fica com lixo. */
-    fprintf(stderr, "[DesertDroid] pre-init: heap Havok (00AA20E0)...\n");
+    /* Inicializacao do heap Havok (sub_00AA20E0) e MM singleton
+     * (sub_00AA2020). O init do MM le [0x11F6118] que so e' preenchido
+     * pelo heap init. RODAR DEPOIS DOS CONSTRUTORES (o heap precisa de
+     * infra criada pelos ctors; rodar antes do CRT = abort). */
+    fprintf(stderr, "[DesertDroid] pos-init: heap Havok (00AA20E0)...\n");
     hle_call_guest(0x00AA20E0u, 0, NULL);
-    fprintf(stderr, "[DesertDroid] pre-init: MM singleton (00AA2020)...\n");
+    fprintf(stderr, "[DesertDroid] pos-init: MM singleton (00AA2020)...\n");
     hle_call_guest(0x00AA2020u, 0, NULL);
+    fprintf(stderr, "[DesertDroid] pos-inits completos; seguindo pro scrt\n");
     /* O check do scrt (0xecc445) compara eax com esi. Retorna g_esi. */
     extern uint32_t g_esi;
     g_eax = g_esi;
