@@ -127,6 +127,23 @@ static void dd_ovr_00A5B5A0(void)
     uint32_t id  = dd_mem32(g_esp + 8);
     if (buf)
         *(uint32_t *)(uintptr_t)buf = 0;         /* "" no buffer destino */
+    /* Completar o header do pool MM natural: o boot ja criou o pool via
+     * sub_00AA3430 (vtable virtual) mas o sub_00AA3760 so inicializa os
+     * SLOTS, nao o header que sub_00AA35A0 le. Se [0x11F622C] e' um
+     * pool valido sem header, completar os campos. */
+    {
+        extern uint32_t dd_mem32(uint32_t va);
+        uint32_t pool = dd_mem32(0x11F622Cu);
+        if (pool >= 0x50000000u && pool < 0x68000000u &&
+            dd_mem32(pool + 8) == 0) {
+            *(uint32_t *)(uintptr_t)(pool + 8)    = pool + 0x80;
+            *(uint32_t *)(uintptr_t)(pool + 0x10) = 256;
+            *(uint32_t *)(uintptr_t)(pool + 4)    = 8;
+            fprintf(stderr, "[DesertDroid] pool header completado: "
+                            "pool=%#x slots=%#x cap=256\n",
+                    pool, pool + 0x80);
+        }
+    }
     fprintf(stderr, "[DesertDroid] format-string id=%u -> \"\" (buffer %#x)\n",
             id, buf);
     g_eax = buf;                                 /* retorno = buffer */
