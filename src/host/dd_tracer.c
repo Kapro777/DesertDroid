@@ -12,6 +12,7 @@
 
 extern uint32_t g_cur_func;
 extern uint32_t hle_call_guest(uint32_t va, int nargs, const uint32_t *args);
+extern void dd_overrides_add(uint32_t va, recomp_func_t fn);
 
 static void dd_tracer_00AA20E0(void)
 {
