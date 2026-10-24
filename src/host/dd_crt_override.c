@@ -76,12 +76,15 @@ static void dd_ovr_00ECCD14(void)
         {
             extern uint32_t g_ecx;
             g_ecx = pool_obj;
-            /* chamar sub_00AA3760 com ecx=pool_obj (this-call via g_ecx) */
-            /* sub_00AA3760 le [ecx+0xC..] e [ecx+0x74] — o pool_obj
-             * precisa estar zerado (guest_alloc ja retorna zerado da arena) */
             hle_call_guest(0x00AA3760u, 1,
                            (const uint32_t[]){ 0x6400u });
         }
+        /* Header do pool — sub_00AA3760 so inicializa os SLOTS, nao o
+         * header que sub_00AA35A0 le: [8]=slot_array, [0x10]=capacity,
+         * [4]=element_size (8 bytes/entry — do imul [esi+4]). */
+        *(uint32_t *)(uintptr_t)(pool_obj + 8)    = pool_obj + 0x80;
+        *(uint32_t *)(uintptr_t)(pool_obj + 0x10) = 256;
+        *(uint32_t *)(uintptr_t)(pool_obj + 4)    = 8;
         *(uint32_t *)(uintptr_t)0x11F622Cu = pool_obj;
         fprintf(stderr, "[DesertDroid] pool MM: obj=%#x (256 slots, CS via dd_sync)\n",
                 pool_obj);
