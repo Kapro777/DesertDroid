@@ -69,6 +69,8 @@ static void dd_crash(int sig, siginfo_t *si, void *ctx)
                 if (vt >= 0x1000u && vt < 0xF0000000u) {
                     fprintf(stderr, "  (vtable valida: [vt+0]=%#x [vt+4]=%#x [vt+8]=%#x [vt+0x10]=%#x)\n",
                             dd_mem32(vt), dd_mem32(vt+4), dd_mem32(vt+8), dd_mem32(vt+0x10));
+                    fprintf(stderr, "  globals MM: [0x11F6118]=%#x [0x11F622C]=%#x [0x11F610D]=%#x [0x11F6110]=%#x [0x11F6238]=%#x\n",
+                            SAFE32(0x11F6118u), SAFE32(0x11F622Cu), SAFE32(0x11F610Du), SAFE32(0x11F6110u), SAFE32(0x11F6238u));
                     /* CORRECAO: o slot vt+0x10 (malloc virtual do MM) tem
                      * valor literal em vez de ponteiro. Apontar para um shim
                      * de alocacao da arena que responde o contrato. */
