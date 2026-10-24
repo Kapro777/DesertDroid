@@ -37,25 +37,54 @@ static void dd_ovr_00ECCD14(void)
         hle_call_guest(INITERM_VA, 2, args);   /* stdcall: push xi_z, xi_a */
     }
     fprintf(stderr, "[DesertDroid] _initterm completou.\n");
-    /* Montar a cadeia do heap Havok DIRETAMENTE (sem chamar codigo guest
-     * — runs #60/61/63/65/66 provaram que inits manuais criam recursao).
-     * A cadeia que o jogo espera:
-     *   [0x11F6118] = container
-     *   [container] = heap_obj  (vtable 0x10A24FC — real, 8+ slots .text)
-     *   [container+4] = 1 (flag "initialized")
-     * O MM init (00AA2020, chamado pelo dispatcher 00AA3050) le
-     * [0x11F6118] via call 0x9FD0F0 (mov eax,[ecx]) e coloca o heap_obj
-     * como vtable do singleton [0x11F6080]. */
+    /* Montar heap + pool do MM diretamente (runs #60-67: inits manuais
+     * recursam; montar os dados e' a unica via estavel). */
     {
         extern uint32_t guest_alloc(size_t size);
+        extern uint32_t hle_call_guest(uint32_t va, int nargs, const uint32_t *args);
+
+        /* 1) heap Havok: container -> heap_obj (vtable real 0x10A24FC) */
         uint32_t heap_obj = guest_alloc(0x100);
-        *(uint32_t *)(uintptr_t)heap_obj = 0x010A24FCu;   /* vtable real   */
+        *(uint32_t *)(uintptr_t)heap_obj = 0x010A24FCu;
         uint32_t container = guest_alloc(0x10);
-        *(uint32_t *)(uintptr_t)container = heap_obj;       /* -> heap_obj  */
-        *(uint8_t *)(uintptr_t)(container + 4) = 1;          /* initialized  */
-        *(uint32_t *)(uintptr_t)0x11F6118u = container;     /* global       */
-        fprintf(stderr, "[DesertDroid] heap Havok montado: container=%#x "
-                        "heap=%#x vtable=0x10A24FC\n", container, heap_obj);
+        *(uint32_t *)(uintptr_t)container = heap_obj;
+        *(uint8_t *)(uintptr_t)(container + 4) = 1;
+        *(uint32_t *)(uintptr_t)0x11F6118u = container;
+        fprintf(stderr, "[DesertDroid] heap: container=%#x heap=%#x vtable=0x10A24FC\n",
+                container, heap_obj);
+
+        /* 2) pool do MM: sub_00AA3430 cria com push 0x10080 do pool_base,
+         *    chama sub_00AA3760 (ctor da lista de 256 slots com CS) e
+         *    armazena em [0x11F622C]. O sub_00AA3760 so precisa de um
+         *    bloco alocado — chamar via guest com o bloco da arena. */
+        uint32_t pool_obj = guest_alloc(0x10080);       /* mesmo tamanho do original */
+        hle_call_guest(0x00AA3760u, 1,
+                       (const uint32_t[]){ 0x6400u });  /* arg = 0x6400 (do original) */
+        /* sub_00AA3760 e' this-call: ecx = pool_obj — setar via g_ecx? */
+        /* Na verdade: o sub_00AA3430 passa ecx=pool_obj pro sub_00AA3760.
+         * hle_call_guest nao seta ecx. Chamar sub_00AA3430 direto:
+         * ele faz tudo (aloca do pool_base, chama o ctor, escreve o global). */
+        *(uint32_t *)(uintptr_t)0x11F622Cu = 0;          /* reset primeiro */
+        /* tentativa: chamar sub_00AA3430 (que le pool_base=0x11F6238):
+         * push 0x10080; mov ecx, 0x11F6238; call 0xAA3E40 (aloca);
+         * test; mov ecx, eax; push 0x6400; call 0xAA3760 (ctor);
+         * mov [0x11F622C], eax.
+         * sub_00AA3E40 aloca do pool_base — verificamos que funciona.
+         * sub_00AA3760 so precisa de ecx = pool_obj + EnterCriticalSection.
+         * O risco de recursao era: 00AA3430 -> 00AA3760 -> CS -> OK.
+         * A recursao era do MALLOC VIRTUAL, nao do ctor do pool! */
+        {
+            extern uint32_t g_ecx;
+            g_ecx = pool_obj;
+            /* chamar sub_00AA3760 com ecx=pool_obj (this-call via g_ecx) */
+            /* sub_00AA3760 le [ecx+0xC..] e [ecx+0x74] — o pool_obj
+             * precisa estar zerado (guest_alloc ja retorna zerado da arena) */
+            hle_call_guest(0x00AA3760u, 1,
+                           (const uint32_t[]){ 0x6400u });
+        }
+        *(uint32_t *)(uintptr_t)0x11F622Cu = pool_obj;
+        fprintf(stderr, "[DesertDroid] pool MM: obj=%#x (256 slots, CS via dd_sync)\n",
+                pool_obj);
     }
     /* O check do scrt (0xecc445) compara eax com esi. Retorna g_esi. */
     extern uint32_t g_esi;
