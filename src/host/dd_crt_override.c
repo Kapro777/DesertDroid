@@ -37,10 +37,15 @@ static void dd_ovr_00ECCD14(void)
         hle_call_guest(INITERM_VA, 2, args);   /* stdcall: push xi_z, xi_a */
     }
     fprintf(stderr, "[DesertDroid] _initterm completou.\n");
-    /* NOTA (runs #60/61): nao chamar heap/MM init manualmente — o fluxo
-     * natural ja os chama; manualmente so cria chicken-and-egg (o heap
-     * init usa o malloc do MM que precisa do singleton que o heap init
-     * deve criar). A sequencia natural e' autocontida. */
+    /* heap Havok (00AA20E0) preenche [0x11F6118] que o MM init (00AA2020)
+     * le como fonte da vtable. Sem ele, a vtable do singleton fica com
+     * lixo e o malloc virtual do MM crasha em [vt+0x10]=0x10.
+     * Ordem: DEPOIS do _initterm (o heap precisa da infra dos ctors). */
+    fprintf(stderr, "[DesertDroid] init: heap Havok (00AA20E0)...\n");
+    hle_call_guest(0x00AA20E0u, 0, NULL);
+    fprintf(stderr, "[DesertDroid] init: MM singleton (00AA2020)...\n");
+    hle_call_guest(0x00AA2020u, 0, NULL);
+    fprintf(stderr, "[DesertDroid] heap+MM init ok\n");
     /* O check do scrt (0xecc445) compara eax com esi. Retorna g_esi. */
     extern uint32_t g_esi;
     g_eax = g_esi;
