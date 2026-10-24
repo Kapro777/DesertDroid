@@ -38,57 +38,36 @@ static void dd_ovr_00ECCD14(void)
         hle_call_guest(INITERM_VA, 2, args);   /* stdcall: push xi_z, xi_a */
     }
     fprintf(stderr, "[DesertDroid] _initterm completou.\n");
-    /* Montar heap + pool do MM diretamente (runs #60-67: inits manuais
-     * recursam; montar os dados e' a unica via estavel). */
+    /* Pool MM: os construtores (que acabaram de rodar) criam o pool via
+     * vtable (sub_00AA3430) e o escrevem em [0x11F622C]. Mas o sub_00AA3760
+     * so inicializa os SLOTS, nao o header que sub_00AA35A0 le.
+     * Completar o header DEPOIS dos construtores, ANTES do boot. */
     {
+        extern uint32_t dd_mem32(uint32_t va);
         extern uint32_t guest_alloc(size_t size);
-        extern uint32_t hle_call_guest(uint32_t va, int nargs, const uint32_t *args);
-
-        /* 1) heap Havok: container -> heap_obj (vtable real 0x10A24FC) */
-        uint32_t heap_obj = guest_alloc(0x100);
-        *(uint32_t *)(uintptr_t)heap_obj = 0x010A24FCu;
-        uint32_t container = guest_alloc(0x10);
-        *(uint32_t *)(uintptr_t)container = heap_obj;
-        *(uint8_t *)(uintptr_t)(container + 4) = 1;
-        *(uint32_t *)(uintptr_t)0x11F6118u = container;
-        fprintf(stderr, "[DesertDroid] heap: container=%#x heap=%#x vtable=0x10A24FC\n",
-                container, heap_obj);
-
-        /* 2) pool do MM: sub_00AA3430 cria com push 0x10080 do pool_base,
-         *    chama sub_00AA3760 (ctor da lista de 256 slots com CS) e
-         *    armazena em [0x11F622C]. O sub_00AA3760 so precisa de um
-         *    bloco alocado — chamar via guest com o bloco da arena. */
-        uint32_t pool_obj = guest_alloc(0x10080);       /* mesmo tamanho do original */
-        hle_call_guest(0x00AA3760u, 1,
-                       (const uint32_t[]){ 0x6400u });  /* arg = 0x6400 (do original) */
-        /* sub_00AA3760 e' this-call: ecx = pool_obj — setar via g_ecx? */
-        /* Na verdade: o sub_00AA3430 passa ecx=pool_obj pro sub_00AA3760.
-         * hle_call_guest nao seta ecx. Chamar sub_00AA3430 direto:
-         * ele faz tudo (aloca do pool_base, chama o ctor, escreve o global). */
-        *(uint32_t *)(uintptr_t)0x11F622Cu = 0;          /* reset primeiro */
-        /* tentativa: chamar sub_00AA3430 (que le pool_base=0x11F6238):
-         * push 0x10080; mov ecx, 0x11F6238; call 0xAA3E40 (aloca);
-         * test; mov ecx, eax; push 0x6400; call 0xAA3760 (ctor);
-         * mov [0x11F622C], eax.
-         * sub_00AA3E40 aloca do pool_base — verificamos que funciona.
-         * sub_00AA3760 so precisa de ecx = pool_obj + EnterCriticalSection.
-         * O risco de recursao era: 00AA3430 -> 00AA3760 -> CS -> OK.
-         * A recursao era do MALLOC VIRTUAL, nao do ctor do pool! */
-        {
-            extern uint32_t g_ecx;
-            g_ecx = pool_obj;
-            hle_call_guest(0x00AA3760u, 1,
-                           (const uint32_t[]){ 0x6400u });
+        uint32_t global_pool = dd_mem32(0x11F622Cu);
+        if (global_pool >= 0x50000000u && global_pool < 0x68000000u &&
+            dd_mem32(global_pool + 8) == 0) {
+            *(uint32_t *)(uintptr_t)(global_pool + 8)    = global_pool + 0x80;
+            *(uint32_t *)(uintptr_t)(global_pool + 0x10) = 256;
+            *(uint32_t *)(uintptr_t)(global_pool + 4)    = 8;
+            fprintf(stderr, "[DesertDroid] pool header completado: pool=%#x "
+                            "slots=%#x cap=256\n",
+                    global_pool, global_pool + 0x80);
         }
-        /* Header do pool — sub_00AA3760 so inicializa os SLOTS, nao o
-         * header que sub_00AA35A0 le: [8]=slot_array, [0x10]=capacity,
-         * [4]=element_size (8 bytes/entry — do imul [esi+4]). */
-        *(uint32_t *)(uintptr_t)(pool_obj + 8)    = pool_obj + 0x80;
-        *(uint32_t *)(uintptr_t)(pool_obj + 0x10) = 256;
-        *(uint32_t *)(uintptr_t)(pool_obj + 4)    = 8;
-        *(uint32_t *)(uintptr_t)0x11F622Cu = pool_obj;
-        fprintf(stderr, "[DesertDroid] pool MM: obj=%#x (256 slots, CS via dd_sync)\n",
-                pool_obj);
+        /* heap Havok: [0x11F6118] = container -> heap_obj (vtable real) */
+        if (dd_mem32(0x11F6118u) == 0 ||
+            dd_mem32(0x11F6118u) < 0x50000000u) {
+            uint32_t heap_obj = guest_alloc(0x100);
+            *(uint32_t *)(uintptr_t)heap_obj = 0x010A24FCu;
+            uint32_t container = guest_alloc(0x10);
+            *(uint32_t *)(uintptr_t)container = heap_obj;
+            *(uint8_t *)(uintptr_t)(container + 4) = 1;
+            *(uint32_t *)(uintptr_t)0x11F6118u = container;
+            fprintf(stderr, "[DesertDroid] heap montado: container=%#x "
+                            "heap=%#x vtable=0x10A24FC\n",
+                    container, heap_obj);
+        }
     }
     /* O check do scrt (0xecc445) compara eax com esi. Retorna g_esi. */
     extern uint32_t g_esi;
@@ -179,7 +158,6 @@ void dd_crt_overrides_register(void)
     dd_overrides_add(0x00A5B5A0u, dd_ovr_00A5B5A0);
     dd_overrides_add(0x00EC61C0u, dd_ovr_memset);   /* memset do CRT  */
     dd_overrides_add(0x00EC44D0u, dd_ovr_memcpy);   /* memmove        */
-    dd_overrides_add(0x00AA35A0u, dd_ovr_00AA35A0); /* pool allocator  */
     fprintf(stderr, "[DesertDroid] overrides CRT registrados "
             "(00ECCD14, 00A5B5A0, memset/memcpy nativos)\n");
 }
@@ -192,6 +170,7 @@ static void dd_ovr_00AA35A0(void)
 {
     extern uint32_t dd_mem32(uint32_t va);
     extern uint32_t g_ecx;
+    extern uint32_t g_eax;
     uint32_t global_pool = dd_mem32(0x11F622Cu);
     if (global_pool >= 0x50000000u && global_pool < 0x68000000u &&
         dd_mem32(global_pool + 8) == 0) {
@@ -202,11 +181,16 @@ static void dd_ovr_00AA35A0(void)
                         "slots=%#x cap=256\n",
                 global_pool, global_pool + 0x80);
     }
-    /* logar o this e chamar o original */
-    extern uint32_t g_eax;
-    fprintf(stderr, "[pool] 00AA35A0(this=%#x) -> chamando original...\n", g_ecx);
-    fflush(stderr);
-    hle_call_guest(0x00AA35A0u, 0, NULL);
-    fprintf(stderr, "[pool] 00AA35A0 retornou eax=%#x\n", g_eax);
-    fflush(stderr);
+    /* NAO chamar o original via dispatch — o stub aponta pra CA! Chamar
+     * diretamente a funcao liftada via recomp_lookup (bypass do manual). */
+    {
+        extern recomp_func_t recomp_lookup(uint32_t va);
+        recomp_func_t f = recomp_lookup(0x00AA35A0u);
+        if (f) {
+            f();
+        } else {
+            fprintf(stderr, "[pool] 00AA35A0: original nao encontrado!\n");
+            g_eax = 0;
+        }
+    }
 }
