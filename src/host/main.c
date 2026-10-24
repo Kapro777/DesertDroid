@@ -122,19 +122,25 @@ static void *dd_monitor_thread(void *arg)
     (void)arg;
     extern uint32_t g_cur_func;
     extern const char *g_cur_import;
-    for (int i = 0; g_mon_run && i < 600; i++) {  /* max 600 = 60s x 10 */
+    fprintf(stderr, "[mon] thread iniciada!\n");
+    fflush(stderr);
+    for (int i = 0; g_mon_run && i < 3000; i++) {  /* max 300s x 10 */
         usleep(100000);                            /* 100ms */
         fprintf(stderr, "[mon %d] sub_%08X import=%s\n",
                 i, g_cur_func, g_cur_import ? g_cur_import : "-");
+        fflush(stderr);
     }
+    fprintf(stderr, "[mon] thread finalizando\n");
     return NULL;
 }
 
 static void dd_install_sampler(void)
 {
     pthread_t t;
-    pthread_create(&t, NULL, dd_monitor_thread, NULL);
-    pthread_detach(t);
+    int rc = pthread_create(&t, NULL, dd_monitor_thread, NULL);
+    fprintf(stderr, "[mon] pthread_create = %d\n", rc);
+    fflush(stderr);
+    if (rc == 0) pthread_detach(t);
 }
 
 int main(int argc, char **argv)
