@@ -21,6 +21,7 @@
 extern uint32_t g_eax;
 extern void dd_overrides_add(uint32_t va, recomp_func_t fn);
 static void dd_ovr_00AA35A0(void);
+static void dd_ovr_00A5B270(void);
 uint32_t dd_tls_slot_value(uint32_t idx);
 
 /* _initterm real = sub_00ECCCF0 (catalogado); args do original:
@@ -158,6 +159,7 @@ void dd_crt_overrides_register(void)
     dd_overrides_add(0x00A5B5A0u, dd_ovr_00A5B5A0);
     dd_overrides_add(0x00EC61C0u, dd_ovr_memset);   /* memset do CRT  */
     dd_overrides_add(0x00EC44D0u, dd_ovr_memcpy);   /* memmove        */
+    dd_overrides_add(0x00A5B270u, dd_ovr_00A5B270); /* pre-MM: pool header */
     fprintf(stderr, "[DesertDroid] overrides CRT registrados "
             "(00ECCD14, 00A5B5A0, memset/memcpy nativos)\n");
 }
@@ -193,4 +195,40 @@ static void dd_ovr_00AA35A0(void)
             g_eax = 0;
         }
     }
+}
+
+/* sub_00A5B270: chamado ANTES da 1a alocacao do MM. Ponto perfeito para
+ * completar o header do pool que o boot natural criou (sub_00AA3760 so
+ * inicializa slots, nao o header). */
+static void dd_ovr_00A5B270(void)
+{
+    extern uint32_t dd_mem32(uint32_t va);
+    extern uint32_t g_ecx;
+    uint32_t global_pool = dd_mem32(0x11F622Cu);
+    if (global_pool >= 0x50000000u && global_pool < 0x68000000u &&
+        dd_mem32(global_pool + 8) == 0) {
+        *(uint32_t *)(uintptr_t)(global_pool + 8)    = global_pool + 0x80;
+        *(uint32_t *)(uintptr_t)(global_pool + 0x10) = 256;
+        *(uint32_t *)(uintptr_t)(global_pool + 4)    = 8;
+        fprintf(stderr, "[DesertDroid] pool header (via 00A5B270): "
+                        "pool=%#x slots=%#x cap=256\n",
+                global_pool, global_pool + 0x80);
+    }
+    /* chamar o ORIGINAL: 00A5B270 NAO esta em overrides.txt como stub
+     * que recursa — e' um stub que chama recomp_lookup_manual, que
+     * NOS implementamos. Entao chamar o original via dispatch normal. */
+    /* MAS: o dispatch vai achar NOSSO override! Precisamos do ORIGINAL.
+     * O stub e' sub_00A5B270 (chamado pela gen code), que chama
+     * recomp_lookup_manual(0x00A5B270) que acha DD_OVR_00A5B270 (nos).
+     * O ORIGINAL sub_00A5B270 foi SUBSTITUIDO pelo stub. Nao ha original.
+     * FIX: fazer o trabalho DO original (format-chain) aqui mesmo. */
+    /* O 00A5B270 e' um this-call que faz a lookup na string-table.
+     * A cadeia normal: 00A5B270 -> 00A5B4B0 -> 0096AD30 -> 0096AE90
+     * O nosso formato responde "" (vazio) — replicar isso. */
+    extern uint32_t g_eax;
+    extern uint32_t g_esp;
+    uint32_t buf = dd_mem32(g_esp + 4);
+    if (buf) *(uint32_t*)(uintptr_t)buf = 0;
+    g_eax = buf;
+    fprintf(stderr, "[DesertDroid] 00A5B270 -> \"\" (buf=%#x)\n", buf);
 }
