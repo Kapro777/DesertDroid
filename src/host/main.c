@@ -65,10 +65,27 @@ static void dd_crash(int sig, siginfo_t *si, void *ctx)
             uint32_t s = dd_mem32(0x11F6080u);
             if (s != 0xDEADBEEFu && s >= 0x1000u && s < 0xF0000000u) {
                 uint32_t vt = dd_mem32(s);
-                if (vt >= 0x1000u && vt < 0xF0000000u)
+                if (vt >= 0x1000u && vt < 0xF0000000u) {
                     fprintf(stderr, "  (vtable valida: [vt+0]=%#x [vt+4]=%#x [vt+8]=%#x [vt+0x10]=%#x)\n",
                             dd_mem32(vt), dd_mem32(vt+4), dd_mem32(vt+8), dd_mem32(vt+0x10));
-                else
+                    /* CORRECAO: o slot vt+0x10 (malloc virtual do MM) tem
+                     * valor literal em vez de ponteiro. Apontar para um shim
+                     * de alocacao da arena que responde o contrato. */
+                    if (dd_mem32(vt + 0x10) < 0x1000u) {
+                        extern uint32_t guest_alloc(size_t size);
+                        extern uint32_t dd_mem32(uint32_t va);
+                        /* criar um shim: alocamos um bloco e escrevemos
+                         * um "trampoline" simples: o jogo chama [vt+0x10]
+                         * como funcao this-call com os args do malloc —
+                         * usamos o proprio mecanismo: registramos um
+                         * shim win32hle com o nome D3D9_... e apontamos */
+                        /* MAS: o mais simples e' apontar para o metodo
+                         * ja-existente em [vt+0] (0x10A24FC) se ele for
+                         * o alocador — VERIFICAR antes de aplicar */
+                        fprintf(stderr, "  MM: vtable parcial detectado (slot +0x10 = %#x < 0x1000)\n",
+                                dd_mem32(vt + 0x10));
+                    }
+                } else
                     fprintf(stderr, "  (vtable INVALIDA: %#x)\n", vt);
             }
         }
