@@ -10,5 +10,6 @@
 00ECCD14 wrapper _initterm (skip callback exit pre-WinMain)
 00A5B5A0 format-string (buffer, id) — string vazia + buffer como retorno
 00A5B270 PRE-MM: completa pool header antes da 1a alocacao
+00A5B690 strlen/string lookup — retorna 0 (string vazia)
 00EC61C0 memset CRT — nativo do host (tail-jmp liftado suspeito do desalinhamento)
 00EC44D0 memmove CRT — nativo do host

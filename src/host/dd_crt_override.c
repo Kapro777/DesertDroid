@@ -22,6 +22,7 @@ extern uint32_t g_eax;
 extern void dd_overrides_add(uint32_t va, recomp_func_t fn);
 static void dd_ovr_00AA35A0(void);
 static void dd_ovr_00A5B270(void);
+static void dd_ovr_00A5B690(void);
 uint32_t dd_tls_slot_value(uint32_t idx);
 
 /* _initterm real = sub_00ECCCF0 (catalogado); args do original:
@@ -160,6 +161,7 @@ void dd_crt_overrides_register(void)
     dd_overrides_add(0x00EC61C0u, dd_ovr_memset);   /* memset do CRT  */
     dd_overrides_add(0x00EC44D0u, dd_ovr_memcpy);   /* memmove        */
     dd_overrides_add(0x00A5B270u, dd_ovr_00A5B270); /* pre-MM: pool header */
+    dd_overrides_add(0x00A5B690u, dd_ovr_00A5B690); /* strlen: string vazia */
     fprintf(stderr, "[DesertDroid] overrides CRT registrados "
             "(00ECCD14, 00A5B5A0, memset/memcpy nativos)\n");
 }
@@ -231,4 +233,25 @@ static void dd_ovr_00A5B270(void)
     if (buf) *(uint32_t*)(uintptr_t)buf = 0;
     g_eax = buf;
     fprintf(stderr, "[DesertDroid] 00A5B270 -> \"\" (buf=%#x)\n", buf);
+}
+
+/* sub_00A5B690: strlen/string lookup do jogo. Le [0x11F42C0]+0x2080
+ * como tabela de strings e faz lookup por ID. Sem a tabela carregada
+ * (o jogo carrega de arquivos), responde strlen=0 (string vazia). */
+static void dd_ovr_00A5B690(void)
+{
+    extern uint32_t g_eax;
+    extern uint32_t g_esp;
+    extern uint32_t dd_mem32(uint32_t va);
+    /* tambem completar pool header se ainda nao foi (fallback) */
+    uint32_t global_pool = dd_mem32(0x11F622Cu);
+    if (global_pool >= 0x50000000u && global_pool < 0x68000000u &&
+        dd_mem32(global_pool + 8) == 0) {
+        *(uint32_t *)(uintptr_t)(global_pool + 8)    = global_pool + 0x80;
+        *(uint32_t *)(uintptr_t)(global_pool + 0x10) = 256;
+        *(uint32_t *)(uintptr_t)(global_pool + 4)    = 8;
+        fprintf(stderr, "[DesertDroid] pool header (via 00A5B690): pool=%#x\n",
+                global_pool);
+    }
+    g_eax = 0;   /* strlen = 0: string vazia */
 }
