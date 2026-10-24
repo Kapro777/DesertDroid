@@ -57,6 +57,21 @@ static void dd_crash(int sig, siginfo_t *si, void *ctx)
         fprintf(stderr, "  frame local: [ebp-14]=%#x [ebp-10]=%#x [ebp-C]=%#x [ebp-8]=%#x [ebp-4]=%#x\n",
                 SAFE32(g_ebp - 0x14), SAFE32(g_ebp - 0x10), SAFE32(g_ebp - 0xC),
                 SAFE32(g_ebp - 0x8), SAFE32(g_ebp - 0x4));
+        fprintf(stderr, "  MM singleton [0x11F6080]=%#x -> vtable=%#x -> [vt+0]=%#x\n",
+                SAFE32(0x11F6080u),
+                (SAFE32(0x11F6080u) != 0xDEADBEEFu) ? SAFE32(SAFE32(0x11F6080u)) : 0xDEADBEEFu,
+                0xDEADBEEFu);
+        {
+            uint32_t s = dd_mem32(0x11F6080u);
+            if (s != 0xDEADBEEFu && s >= 0x1000u && s < 0xF0000000u) {
+                uint32_t vt = dd_mem32(s);
+                if (vt >= 0x1000u && vt < 0xF0000000u)
+                    fprintf(stderr, "  (vtable valida: [vt+0]=%#x [vt+4]=%#x [vt+8]=%#x [vt+0x10]=%#x)\n",
+                            dd_mem32(vt), dd_mem32(vt+4), dd_mem32(vt+8), dd_mem32(vt+0x10));
+                else
+                    fprintf(stderr, "  (vtable INVALIDA: %#x)\n", vt);
+            }
+        }
     }
     fprintf(stderr, "  (mapear sub_XXXXXX em work/names.json ou no catalogo)\n");
     {
