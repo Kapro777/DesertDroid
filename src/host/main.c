@@ -122,9 +122,9 @@ static void *dd_monitor_thread(void *arg)
     (void)arg;
     extern uint32_t g_cur_func;
     extern const char *g_cur_import;
-    fprintf(stderr, "[mon] thread iniciada!\n");
+    fprintf(stderr, "[mon] thread iniciada! g_mon_run=%u\n", g_mon_run);
     fflush(stderr);
-    for (int i = 0; g_mon_run && i < 3000; i++) {
+    for (int i = 0; i < 3000; i++) {
         fprintf(stderr, "[mon %d PRE] i=%d\n", i, i);  /* ANTES do usleep */
         fflush(stderr);
         usleep(100000);
