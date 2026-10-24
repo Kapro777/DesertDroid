@@ -20,6 +20,7 @@
 
 extern uint32_t g_eax;
 extern void dd_overrides_add(uint32_t va, recomp_func_t fn);
+static void dd_ovr_00AA35A0(void);
 uint32_t dd_tls_slot_value(uint32_t idx);
 
 /* _initterm real = sub_00ECCCF0 (catalogado); args do original:
@@ -178,6 +179,29 @@ void dd_crt_overrides_register(void)
     dd_overrides_add(0x00A5B5A0u, dd_ovr_00A5B5A0);
     dd_overrides_add(0x00EC61C0u, dd_ovr_memset);   /* memset do CRT  */
     dd_overrides_add(0x00EC44D0u, dd_ovr_memcpy);   /* memmove        */
+    dd_overrides_add(0x00AA35A0u, dd_ovr_00AA35A0); /* pool allocator  */
     fprintf(stderr, "[DesertDroid] overrides CRT registrados "
             "(00ECCD14, 00A5B5A0, memset/memcpy nativos)\n");
+}
+
+/* sub_00AA35A0 = o pool allocator do MM. O boot natural cria o pool via
+ * vtable (sub_00AA3430) mas o sub_00AA3760 so inicializa SLOTS, nao o
+ * header ([+8]=slot_array, [+0x10]=capacity, [+4]=element_size). Este
+ * override completa o header na primeira chamada e chama o original. */
+static void dd_ovr_00AA35A0(void)
+{
+    extern uint32_t dd_mem32(uint32_t va);
+    extern uint32_t g_ecx;
+    uint32_t global_pool = dd_mem32(0x11F622Cu);
+    if (global_pool >= 0x50000000u && global_pool < 0x68000000u &&
+        dd_mem32(global_pool + 8) == 0) {
+        *(uint32_t *)(uintptr_t)(global_pool + 8)    = global_pool + 0x80;
+        *(uint32_t *)(uintptr_t)(global_pool + 0x10) = 256;
+        *(uint32_t *)(uintptr_t)(global_pool + 4)    = 8;
+        fprintf(stderr, "[DesertDroid] pool header completado: pool=%#x "
+                        "slots=%#x cap=256\n",
+                global_pool, global_pool + 0x80);
+    }
+    /* chamar o ORIGINAL com o MESMO this (g_ecx preservado) */
+    hle_call_guest(0x00AA35A0u, 0, NULL);
 }
