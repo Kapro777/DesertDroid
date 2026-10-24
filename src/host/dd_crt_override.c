@@ -202,6 +202,11 @@ static void dd_ovr_00AA35A0(void)
                         "slots=%#x cap=256\n",
                 global_pool, global_pool + 0x80);
     }
-    /* chamar o ORIGINAL com o MESMO this (g_ecx preservado) */
+    /* logar o this e chamar o original */
+    extern uint32_t g_eax;
+    fprintf(stderr, "[pool] 00AA35A0(this=%#x) -> chamando original...\n", g_ecx);
+    fflush(stderr);
     hle_call_guest(0x00AA35A0u, 0, NULL);
+    fprintf(stderr, "[pool] 00AA35A0 retornou eax=%#x\n", g_eax);
+    fflush(stderr);
 }
