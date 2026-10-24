@@ -11,3 +11,6 @@
 00A5B5A0 format-string (buffer, id) — string vazia + buffer como retorno
 00EC61C0 memset CRT — nativo do host (tail-jmp liftado suspeito do desalinhamento)
 00EC44D0 memmove CRT — nativo do host
+00AA20E0 TRACER: heap init — logar caller e chamar original
+00AA2020 TRACER: MM init — logar caller e chamar original
+00AA211C TRACER: heap global write — logar caller e chamar original
