@@ -13,3 +13,4 @@
 00A5B690 strlen/string lookup — retorna 0 (string vazia)
 00EC61C0 memset CRT — nativo do host (tail-jmp liftado suspeito do desalinhamento)
 00EC44D0 memmove CRT — nativo do host
+00AA3300 pool ctor (vtable+0x10) — retorna pool existente, nao recria

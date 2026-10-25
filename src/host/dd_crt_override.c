@@ -23,6 +23,7 @@ extern void dd_overrides_add(uint32_t va, recomp_func_t fn);
 static void dd_ovr_00AA35A0(void);
 static void dd_ovr_00A5B270(void);
 static void dd_ovr_00A5B690(void);
+static void dd_ovr_00AA3300(void);
 uint32_t dd_tls_slot_value(uint32_t idx);
 
 /* _initterm real = sub_00ECCCF0 (catalogado); args do original:
@@ -162,6 +163,7 @@ void dd_crt_overrides_register(void)
     dd_overrides_add(0x00EC44D0u, dd_ovr_memcpy);   /* memmove        */
     dd_overrides_add(0x00A5B270u, dd_ovr_00A5B270); /* pre-MM: pool header */
     dd_overrides_add(0x00A5B690u, dd_ovr_00A5B690); /* strlen: string vazia */
+    dd_overrides_add(0x00AA3300u, dd_ovr_00AA3300); /* vtable+0x10: retorna pool existente */
     fprintf(stderr, "[DesertDroid] overrides CRT registrados "
             "(00ECCD14, 00A5B5A0, memset/memcpy nativos)\n");
 }
@@ -254,4 +256,36 @@ static void dd_ovr_00A5B690(void)
                 global_pool);
     }
     g_eax = 0;   /* strlen = 0: string vazia */
+}
+
+/* sub_00AA3300 = vtable+0x10 do heap Havok = CONSTRUTOR do pool.
+ * O jogo chama via virtual e RE-CRIA o pool, perdendo o header que
+ * completamos. Override: retorna o pool JA EXISTENTE (ou cria+header). */
+static void dd_ovr_00AA3300(void)
+{
+    extern uint32_t dd_mem32(uint32_t va);
+    extern uint32_t g_eax;
+    uint32_t pool = dd_mem32(0x11F622Cu);
+    if (pool >= 0x50000000u && pool < 0x68000000u) {
+        /* pool ja existe — garantir header e retornar */
+        if (dd_mem32(pool + 8) == 0) {
+            *(uint32_t *)(uintptr_t)(pool + 8)    = pool + 0x80;
+            *(uint32_t *)(uintptr_t)(pool + 0x10) = 256;
+            *(uint32_t *)(uintptr_t)(pool + 4)    = 8;
+            fprintf(stderr, "[DesertDroid] pool header (via 00AA3300): pool=%#x\n", pool);
+        }
+        g_eax = pool;
+        return;
+    }
+    /* sem pool — criar do zero com header completo */
+    {
+        extern uint32_t guest_alloc(size_t size);
+        pool = guest_alloc(0x10080);
+        *(uint32_t *)(uintptr_t)(pool + 8)    = pool + 0x80;
+        *(uint32_t *)(uintptr_t)(pool + 0x10) = 256;
+        *(uint32_t *)(uintptr_t)(pool + 4)    = 8;
+        *(uint32_t *)(uintptr_t)0x11F622Cu = pool;
+        fprintf(stderr, "[DesertDroid] pool criado (via 00AA3300): pool=%#x\n", pool);
+        g_eax = pool;
+    }
 }
