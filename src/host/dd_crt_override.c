@@ -54,6 +54,7 @@ static void dd_ovr_00ECCD14(void)
             *(uint32_t *)(uintptr_t)(global_pool + 8)    = global_pool + 0x80;
             *(uint32_t *)(uintptr_t)(global_pool + 0x10) = 256;
             *(uint32_t *)(uintptr_t)(global_pool + 4)    = 8;
+            *(uint32_t *)(uintptr_t)(global_pool + 0)    = 1;
             fprintf(stderr, "[DesertDroid] pool header completado: pool=%#x "
                             "slots=%#x cap=256\n",
                     global_pool, global_pool + 0x80);
@@ -122,6 +123,7 @@ static void dd_ovr_00A5B5A0(void)
             *(uint32_t *)(uintptr_t)(pool + 8)    = pool + 0x80;
             *(uint32_t *)(uintptr_t)(pool + 0x10) = 256;
             *(uint32_t *)(uintptr_t)(pool + 4)    = 8;
+        *(uint32_t *)(uintptr_t)(pool + 0)    = 1;
             fprintf(stderr, "[DesertDroid] pool header completado: "
                             "pool=%#x slots=%#x cap=256\n",
                     pool, pool + 0x80);
@@ -183,6 +185,7 @@ static void dd_ovr_00AA35A0(void)
         *(uint32_t *)(uintptr_t)(global_pool + 8)    = global_pool + 0x80;
         *(uint32_t *)(uintptr_t)(global_pool + 0x10) = 256;
         *(uint32_t *)(uintptr_t)(global_pool + 4)    = 8;
+            *(uint32_t *)(uintptr_t)(global_pool + 0)    = 1;
         fprintf(stderr, "[DesertDroid] pool header completado: pool=%#x "
                         "slots=%#x cap=256\n",
                 global_pool, global_pool + 0x80);
@@ -214,6 +217,7 @@ static void dd_ovr_00A5B270(void)
         *(uint32_t *)(uintptr_t)(global_pool + 8)    = global_pool + 0x80;
         *(uint32_t *)(uintptr_t)(global_pool + 0x10) = 256;
         *(uint32_t *)(uintptr_t)(global_pool + 4)    = 8;
+            *(uint32_t *)(uintptr_t)(global_pool + 0)    = 1;
         fprintf(stderr, "[DesertDroid] pool header (via 00A5B270): "
                         "pool=%#x slots=%#x cap=256\n",
                 global_pool, global_pool + 0x80);
@@ -252,6 +256,7 @@ static void dd_ovr_00A5B690(void)
         *(uint32_t *)(uintptr_t)(global_pool + 8)    = global_pool + 0x80;
         *(uint32_t *)(uintptr_t)(global_pool + 0x10) = 256;
         *(uint32_t *)(uintptr_t)(global_pool + 4)    = 8;
+            *(uint32_t *)(uintptr_t)(global_pool + 0)    = 1;
         fprintf(stderr, "[DesertDroid] pool header (via 00A5B690): pool=%#x\n",
                 global_pool);
     }
@@ -272,6 +277,7 @@ static void dd_ovr_00AA3300(void)
             *(uint32_t *)(uintptr_t)(pool + 8)    = pool + 0x80;
             *(uint32_t *)(uintptr_t)(pool + 0x10) = 256;
             *(uint32_t *)(uintptr_t)(pool + 4)    = 8;
+        *(uint32_t *)(uintptr_t)(pool + 0)    = 1;
             fprintf(stderr, "[DesertDroid] pool header (via 00AA3300): pool=%#x\n", pool);
         }
         g_eax = pool;
@@ -284,6 +290,7 @@ static void dd_ovr_00AA3300(void)
         *(uint32_t *)(uintptr_t)(pool + 8)    = pool + 0x80;
         *(uint32_t *)(uintptr_t)(pool + 0x10) = 256;
         *(uint32_t *)(uintptr_t)(pool + 4)    = 8;
+        *(uint32_t *)(uintptr_t)(pool + 0)    = 1;
         *(uint32_t *)(uintptr_t)0x11F622Cu = pool;
         fprintf(stderr, "[DesertDroid] pool criado (via 00AA3300): pool=%#x\n", pool);
         g_eax = pool;
