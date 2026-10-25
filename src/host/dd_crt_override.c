@@ -20,10 +20,8 @@
 
 extern uint32_t g_eax;
 extern void dd_overrides_add(uint32_t va, recomp_func_t fn);
-static void dd_ovr_00AA35A0(void);
 static void dd_ovr_00A5B270(void);
 static void dd_ovr_00A5B690(void);
-static void dd_ovr_00AA3300(void);
 uint32_t dd_tls_slot_value(uint32_t idx);
 
 /* _initterm real = sub_00ECCCF0 (catalogado); args do original:
@@ -41,25 +39,16 @@ static void dd_ovr_00ECCD14(void)
         hle_call_guest(INITERM_VA, 2, args);   /* stdcall: push xi_z, xi_a */
     }
     fprintf(stderr, "[DesertDroid] _initterm completou.\n");
-    /* Pool MM: os construtores (que acabaram de rodar) criam o pool via
-     * vtable (sub_00AA3430) e o escrevem em [0x11F622C]. Mas o sub_00AA3760
-     * so inicializa os SLOTS, nao o header que sub_00AA35A0 le.
-     * Completar o header DEPOIS dos construtores, ANTES do boot. */
+    /* heap Havok: [0x11F6118] = container -> heap_obj (vtable real).
+     * O init natural do heap nao roda no nosso caminho de boot; o jogo
+     * le [0x11F6118] ao montar o singleton MM ([0x11F6080]) e despacha
+     * os command handlers (alloc cmd 0xD, free 0xF, realloc 0xC) pela
+     * vtable REAL em 0x10A24FC — tudo codigo liftado do jogo.
+     * NAO mexer no pool ([0x11F622C]): o init natural (sub_00AA3430 ->
+     * sub_00AA3760) ja escreve [slab+0]=class e [slab+4]=chunks/blk. */
     {
         extern uint32_t dd_mem32(uint32_t va);
         extern uint32_t guest_alloc(size_t size);
-        uint32_t global_pool = dd_mem32(0x11F622Cu);
-        if (global_pool >= 0x50000000u && global_pool < 0x68000000u &&
-            dd_mem32(global_pool + 8) == 0) {
-            *(uint32_t *)(uintptr_t)(global_pool + 8)    = global_pool + 0x80;
-            *(uint32_t *)(uintptr_t)(global_pool + 0x10) = 256;
-            *(uint32_t *)(uintptr_t)(global_pool + 4)    = 8;
-            *(uint32_t *)(uintptr_t)(global_pool + 0)    = 1;
-            fprintf(stderr, "[DesertDroid] pool header completado: pool=%#x "
-                            "slots=%#x cap=256\n",
-                    global_pool, global_pool + 0x80);
-        }
-        /* heap Havok: [0x11F6118] = container -> heap_obj (vtable real) */
         if (dd_mem32(0x11F6118u) == 0 ||
             dd_mem32(0x11F6118u) < 0x50000000u) {
             uint32_t heap_obj = guest_alloc(0x100);
@@ -111,24 +100,8 @@ static void dd_ovr_00A5B5A0(void)
     uint32_t id  = dd_mem32(g_esp + 8);
     if (buf)
         *(uint32_t *)(uintptr_t)buf = 0;         /* "" no buffer destino */
-    /* Completar o header do pool MM natural: o boot ja criou o pool via
-     * sub_00AA3430 (vtable virtual) mas o sub_00AA3760 so inicializa os
-     * SLOTS, nao o header que sub_00AA35A0 le. Se [0x11F622C] e' um
-     * pool valido sem header, completar os campos. */
-    {
-        extern uint32_t dd_mem32(uint32_t va);
-        uint32_t pool = dd_mem32(0x11F622Cu);
-        if (pool >= 0x50000000u && pool < 0x68000000u &&
-            dd_mem32(pool + 8) == 0) {
-            *(uint32_t *)(uintptr_t)(pool + 8)    = pool + 0x80;
-            *(uint32_t *)(uintptr_t)(pool + 0x10) = 256;
-            *(uint32_t *)(uintptr_t)(pool + 4)    = 8;
-        *(uint32_t *)(uintptr_t)(pool + 0)    = 1;
-            fprintf(stderr, "[DesertDroid] pool header completado: "
-                            "pool=%#x slots=%#x cap=256\n",
-                    pool, pool + 0x80);
-        }
-    }
+    /* NAO mexer no pool MM ([0x11F622C]): o init natural
+     * (sub_00AA3430 -> sub_00AA3760) ja inicializa todos os slabs. */
     fprintf(stderr, "[DesertDroid] format-string id=%u -> \"\" (buffer %#x)\n",
             id, buf);
     g_eax = buf;                                 /* retorno = buffer */
@@ -163,78 +136,22 @@ void dd_crt_overrides_register(void)
     dd_overrides_add(0x00A5B5A0u, dd_ovr_00A5B5A0);
     dd_overrides_add(0x00EC61C0u, dd_ovr_memset);   /* memset do CRT  */
     dd_overrides_add(0x00EC44D0u, dd_ovr_memcpy);   /* memmove        */
-    dd_overrides_add(0x00A5B270u, dd_ovr_00A5B270); /* pre-MM: pool header */
+    dd_overrides_add(0x00A5B270u, dd_ovr_00A5B270); /* format-chain: "" */
     dd_overrides_add(0x00A5B690u, dd_ovr_00A5B690); /* strlen: string vazia */
-    dd_overrides_add(0x00AA3300u, dd_ovr_00AA3300); /* vtable+0x10: retorna pool existente */
     fprintf(stderr, "[DesertDroid] overrides CRT registrados "
             "(00ECCD14, 00A5B5A0, memset/memcpy nativos)\n");
 }
 
-/* sub_00AA35A0 = o pool allocator do MM. O boot natural cria o pool via
- * vtable (sub_00AA3430) mas o sub_00AA3760 so inicializa SLOTS, nao o
- * header ([+8]=slot_array, [+0x10]=capacity, [+4]=element_size). Este
- * override completa o header na primeira chamada e chama o original. */
-static void dd_ovr_00AA35A0(void)
-{
-    extern uint32_t dd_mem32(uint32_t va);
-    extern uint32_t g_ecx;
-    extern uint32_t g_eax;
-    uint32_t global_pool = dd_mem32(0x11F622Cu);
-    if (global_pool >= 0x50000000u && global_pool < 0x68000000u &&
-        dd_mem32(global_pool + 8) == 0) {
-        *(uint32_t *)(uintptr_t)(global_pool + 8)    = global_pool + 0x80;
-        *(uint32_t *)(uintptr_t)(global_pool + 0x10) = 256;
-        *(uint32_t *)(uintptr_t)(global_pool + 4)    = 8;
-            *(uint32_t *)(uintptr_t)(global_pool + 0)    = 1;
-        fprintf(stderr, "[DesertDroid] pool header completado: pool=%#x "
-                        "slots=%#x cap=256\n",
-                global_pool, global_pool + 0x80);
-    }
-    /* NAO chamar o original via dispatch — o stub aponta pra CA! Chamar
-     * diretamente a funcao liftada via recomp_lookup (bypass do manual). */
-    {
-        extern recomp_func_t recomp_lookup(uint32_t va);
-        recomp_func_t f = recomp_lookup(0x00AA35A0u);
-        if (f) {
-            f();
-        } else {
-            fprintf(stderr, "[pool] 00AA35A0: original nao encontrado!\n");
-            g_eax = 0;
-        }
-    }
-}
-
-/* sub_00A5B270: chamado ANTES da 1a alocacao do MM. Ponto perfeito para
- * completar o header do pool que o boot natural criou (sub_00AA3760 so
- * inicializa slots, nao o header). */
+/* sub_00A5B270: elo da cadeia format-string (00A5B270 -> 00A5B4B0 ->
+ * 0096AD30 -> 0096AE90). Sem o string-manager carregado (init que nao
+ * roda no nosso caminho), o original crasha na lookup. Resposta util:
+ * string vazia no buffer + buffer como retorno (mesmo contrato do
+ * 00A5B5A0). NAO mexer no pool MM — o init natural dele e completo. */
 static void dd_ovr_00A5B270(void)
 {
-    extern uint32_t dd_mem32(uint32_t va);
-    extern uint32_t g_ecx;
-    uint32_t global_pool = dd_mem32(0x11F622Cu);
-    if (global_pool >= 0x50000000u && global_pool < 0x68000000u &&
-        dd_mem32(global_pool + 8) == 0) {
-        *(uint32_t *)(uintptr_t)(global_pool + 8)    = global_pool + 0x80;
-        *(uint32_t *)(uintptr_t)(global_pool + 0x10) = 256;
-        *(uint32_t *)(uintptr_t)(global_pool + 4)    = 8;
-            *(uint32_t *)(uintptr_t)(global_pool + 0)    = 1;
-        fprintf(stderr, "[DesertDroid] pool header (via 00A5B270): "
-                        "pool=%#x slots=%#x cap=256\n",
-                global_pool, global_pool + 0x80);
-    }
-    /* chamar o ORIGINAL: 00A5B270 NAO esta em overrides.txt como stub
-     * que recursa — e' um stub que chama recomp_lookup_manual, que
-     * NOS implementamos. Entao chamar o original via dispatch normal. */
-    /* MAS: o dispatch vai achar NOSSO override! Precisamos do ORIGINAL.
-     * O stub e' sub_00A5B270 (chamado pela gen code), que chama
-     * recomp_lookup_manual(0x00A5B270) que acha DD_OVR_00A5B270 (nos).
-     * O ORIGINAL sub_00A5B270 foi SUBSTITUIDO pelo stub. Nao ha original.
-     * FIX: fazer o trabalho DO original (format-chain) aqui mesmo. */
-    /* O 00A5B270 e' um this-call que faz a lookup na string-table.
-     * A cadeia normal: 00A5B270 -> 00A5B4B0 -> 0096AD30 -> 0096AE90
-     * O nosso formato responde "" (vazio) — replicar isso. */
     extern uint32_t g_eax;
     extern uint32_t g_esp;
+    extern uint32_t dd_mem32(uint32_t va);
     uint32_t buf = dd_mem32(g_esp + 4);
     if (buf) *(uint32_t*)(uintptr_t)buf = 0;
     g_eax = buf;
@@ -247,52 +164,5 @@ static void dd_ovr_00A5B270(void)
 static void dd_ovr_00A5B690(void)
 {
     extern uint32_t g_eax;
-    extern uint32_t g_esp;
-    extern uint32_t dd_mem32(uint32_t va);
-    /* tambem completar pool header se ainda nao foi (fallback) */
-    uint32_t global_pool = dd_mem32(0x11F622Cu);
-    if (global_pool >= 0x50000000u && global_pool < 0x68000000u &&
-        dd_mem32(global_pool + 8) == 0) {
-        *(uint32_t *)(uintptr_t)(global_pool + 8)    = global_pool + 0x80;
-        *(uint32_t *)(uintptr_t)(global_pool + 0x10) = 256;
-        *(uint32_t *)(uintptr_t)(global_pool + 4)    = 8;
-            *(uint32_t *)(uintptr_t)(global_pool + 0)    = 1;
-        fprintf(stderr, "[DesertDroid] pool header (via 00A5B690): pool=%#x\n",
-                global_pool);
-    }
     g_eax = 0;   /* strlen = 0: string vazia */
-}
-
-/* sub_00AA3300 = vtable+0x10 do heap Havok = CONSTRUTOR do pool.
- * O jogo chama via virtual e RE-CRIA o pool, perdendo o header que
- * completamos. Override: retorna o pool JA EXISTENTE (ou cria+header). */
-static void dd_ovr_00AA3300(void)
-{
-    extern uint32_t dd_mem32(uint32_t va);
-    extern uint32_t g_eax;
-    uint32_t pool = dd_mem32(0x11F622Cu);
-    if (pool >= 0x50000000u && pool < 0x68000000u) {
-        /* pool ja existe — garantir header e retornar */
-        if (dd_mem32(pool + 8) == 0) {
-            *(uint32_t *)(uintptr_t)(pool + 8)    = pool + 0x80;
-            *(uint32_t *)(uintptr_t)(pool + 0x10) = 256;
-            *(uint32_t *)(uintptr_t)(pool + 4)    = 8;
-        *(uint32_t *)(uintptr_t)(pool + 0)    = 1;
-            fprintf(stderr, "[DesertDroid] pool header (via 00AA3300): pool=%#x\n", pool);
-        }
-        g_eax = pool;
-        return;
-    }
-    /* sem pool — criar do zero com header completo */
-    {
-        extern uint32_t guest_alloc(size_t size);
-        pool = guest_alloc(0x10080);
-        *(uint32_t *)(uintptr_t)(pool + 8)    = pool + 0x80;
-        *(uint32_t *)(uintptr_t)(pool + 0x10) = 256;
-        *(uint32_t *)(uintptr_t)(pool + 4)    = 8;
-        *(uint32_t *)(uintptr_t)(pool + 0)    = 1;
-        *(uint32_t *)(uintptr_t)0x11F622Cu = pool;
-        fprintf(stderr, "[DesertDroid] pool criado (via 00AA3300): pool=%#x\n", pool);
-        g_eax = pool;
-    }
 }

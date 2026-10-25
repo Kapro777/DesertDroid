@@ -59,38 +59,37 @@ static void dd_crash(int sig, siginfo_t *si, void *ctx)
         fprintf(stderr, "  frame local: [ebp-14]=%#x [ebp-10]=%#x [ebp-C]=%#x [ebp-8]=%#x [ebp-4]=%#x\n",
                 SAFE32(g_ebp - 0x14), SAFE32(g_ebp - 0x10), SAFE32(g_ebp - 0xC),
                 SAFE32(g_ebp - 0x8), SAFE32(g_ebp - 0x4));
-        fprintf(stderr, "  MM singleton [0x11F6080]=%#x -> vtable=%#x -> [vt+0]=%#x\n",
+        fprintf(stderr, "  MM singleton [0x11F6080]=%#x -> heap_obj=%#x -> [heap_obj]=%#x\n",
                 SAFE32(0x11F6080u),
                 (SAFE32(0x11F6080u) != 0xDEADBEEFu) ? SAFE32(SAFE32(0x11F6080u)) : 0xDEADBEEFu,
-                0xDEADBEEFu);
+                (SAFE32(0x11F6080u) != 0xDEADBEEFu) ? SAFE32(SAFE32(SAFE32(0x11F6080u))) : 0xDEADBEEFu);
         {
             uint32_t s = dd_mem32(0x11F6080u);
             if (s != 0xDEADBEEFu && s >= 0x1000u && s < 0xF0000000u) {
-                uint32_t vt = dd_mem32(s);
-                if (vt >= 0x1000u && vt < 0xF0000000u) {
-                    fprintf(stderr, "  (vtable valida: [vt+0]=%#x [vt+4]=%#x [vt+8]=%#x [vt+0x10]=%#x)\n",
-                            dd_mem32(vt), dd_mem32(vt+4), dd_mem32(vt+8), dd_mem32(vt+0x10));
-                    fprintf(stderr, "  globals MM: [0x11F6118]=%#x [0x11F622C]=%#x [0x11F610D]=%#x [0x11F6110]=%#x [0x11F6238]=%#x\n",
-                            SAFE32(0x11F6118u), SAFE32(0x11F622Cu), SAFE32(0x11F610Du), SAFE32(0x11F6110u), SAFE32(0x11F6238u));
-                    /* CORRECAO: o slot vt+0x10 (malloc virtual do MM) tem
-                     * valor literal em vez de ponteiro. Apontar para um shim
-                     * de alocacao da arena que responde o contrato. */
-                    if (dd_mem32(vt + 0x10) < 0x1000u) {
-                        extern uint32_t guest_alloc(size_t size);
-                        extern uint32_t dd_mem32(uint32_t va);
-                        /* criar um shim: alocamos um bloco e escrevemos
-                         * um "trampoline" simples: o jogo chama [vt+0x10]
-                         * como funcao this-call com os args do malloc —
-                         * usamos o proprio mecanismo: registramos um
-                         * shim win32hle com o nome D3D9_... e apontamos */
-                        /* MAS: o mais simples e' apontar para o metodo
-                         * ja-existente em [vt+0] (0x10A24FC) se ele for
-                         * o alocador — VERIFICAR antes de aplicar */
-                        fprintf(stderr, "  MM: vtable parcial detectado (slot +0x10 = %#x < 0x1000)\n",
-                                dd_mem32(vt + 0x10));
+                uint32_t ho = dd_mem32(s);          /* heap_obj */
+                if (ho >= 0x1000u && ho < 0xF0000000u) {
+                    uint32_t vt = dd_mem32(ho);     /* vtable REAL (0x10A24FC) */
+                    if (vt >= 0x1000u && vt < 0xF0000000u) {
+                        fprintf(stderr, "  vtable real %#x: [+0]=%#x [+4]=%#x [+8]=%#x [+0x10]=%#x (alloc cmd 0xD) [+0x14]=%#x (free) [+0x18]=%#x (realloc)\n",
+                                vt, dd_mem32(vt), dd_mem32(vt+4), dd_mem32(vt+8),
+                                dd_mem32(vt+0x10), dd_mem32(vt+0x14), dd_mem32(vt+0x18));
+                        fprintf(stderr, "  globals MM: [0x11F6118]=%#x [0x11F622C]=%#x [0x11F610D]=%#x [0x11F6110]=%#x [0x11F6238]=%#x\n",
+                                SAFE32(0x11F6118u), SAFE32(0x11F622Cu), SAFE32(0x11F610Du), SAFE32(0x11F6110u), SAFE32(0x11F6238u));
+                        /* estado do slab 0 do pool (0xAA35A0 le esses campos) */
+                        {
+                            uint32_t pool = dd_mem32(0x11F622Cu);
+                            if (pool >= 0x1000u && pool < 0xF0000000u)
+                                fprintf(stderr, "  pool slab[0]: [0]=%#x [4]=%#x [8]=%#x [C]=%#x [10]=%#x [14]=%#x [1C]=%#x\n",
+                                        dd_mem32(pool), dd_mem32(pool+4), dd_mem32(pool+8),
+                                        dd_mem32(pool+0xC), dd_mem32(pool+0x10),
+                                        dd_mem32(pool+0x14), dd_mem32(pool+0x1C));
+                        }
+                    } else {
+                        fprintf(stderr, "  (vtable INVALIDA: [heap_obj]=%#x)\n", vt);
                     }
-                } else
-                    fprintf(stderr, "  (vtable INVALIDA: %#x)\n", vt);
+                } else {
+                    fprintf(stderr, "  (heap_obj INVALIDO: %x)\n", ho);
+                }
             }
         }
     }
