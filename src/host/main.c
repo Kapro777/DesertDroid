@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <execinfo.h>
 #include <sys/time.h>
 #include "host.h"
 #include "recomp_types.h"
@@ -59,6 +60,26 @@ static void dd_crash(int sig, siginfo_t *si, void *ctx)
         fprintf(stderr, "  frame local: [ebp-14]=%#x [ebp-10]=%#x [ebp-C]=%#x [ebp-8]=%#x [ebp-4]=%#x\n",
                 SAFE32(g_ebp - 0x14), SAFE32(g_ebp - 0x10), SAFE32(g_ebp - 0xC),
                 SAFE32(g_ebp - 0x8), SAFE32(g_ebp - 0x4));
+        /* call site: [g_esp] = return address do call corrente; [+4..] = args */
+        fprintf(stderr, "  call site: ret=[esp]%#x args=[esp+4]%#x [esp+8]%#x [esp+C]%#x [esp+10]%#x\n",
+                SAFE32(g_esp), SAFE32(g_esp + 4), SAFE32(g_esp + 8),
+                SAFE32(g_esp + 0xC), SAFE32(g_esp + 0x10));
+        /* CRT VS2008: IAT HeapAlloc, _crtheap, modo malloc/SBH */
+        fprintf(stderr, "  CRT: [0xFDF1A0]HeapAlloc=%#x [0x12705BC]_crtheap=%#x [0x1270948]modo=%#x [0x1270938]sbh_thr=%#x\n",
+                SAFE32(0xFDF1A0u), SAFE32(0x12705BCu), SAFE32(0x1270948u),
+                SAFE32(0x1270938u));
+        {
+            extern uint64_t guest_mem_used(void);
+            fprintf(stderr, "  arena: bump=%llu bytes (%.1f MB de 384)\n",
+                    (unsigned long long)guest_mem_used(),
+                    (double)guest_mem_used() / (1024.0 * 1024.0));
+        }
+        {
+            void *bt[24];
+            int n = backtrace(bt, 24);
+            fprintf(stderr, "  host backtrace (%d frames):\n", n);
+            backtrace_symbols_fd(bt, n, 2);
+        }
         fprintf(stderr, "  MM singleton [0x11F6080]=%#x -> heap_obj=%#x -> [heap_obj]=%#x\n",
                 SAFE32(0x11F6080u),
                 (SAFE32(0x11F6080u) != 0xDEADBEEFu) ? SAFE32(SAFE32(0x11F6080u)) : 0xDEADBEEFu,
