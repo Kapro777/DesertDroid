@@ -95,3 +95,28 @@ retornava o pool pra toda malloc ERAM a corrupcao.
    `[[heap_obj]]+slots` e o slab[0].
 3. `_initterm` termina antes do pool existir; o pool e' criado depois,
    por codigo do jogo — override de 00ECCD14 nao deve tocar no pool.
+4. **ARMADILHA DO DUMP: os globals g_eax/g_esi/... so sincronizam em
+   FRONTEIRAS de funcao** (`RECOMP_RETURN` faz REGS_OUT; `RECOMP_ICALL`
+   tambem). Os registradores impressos no crash sao o estado da ULTIMA
+   fronteira, nao do instante do fault — podem ser da funcao que
+   acabou de retornar (ex.: dump esi=8 era o SIZE do 0xECD1C7, nao o
+   `this`). O que e' confiavel: si_addr, o backtrace e o [esp] do call
+   site.
+5. **g_cur_func e' salvvo por thread** (regs_save inclui cur) — mostra
+   a thread que faultou, nao a ultima entrada do trace global (que
+   mistura threads).
+6. 0xECD1C7 (malloc CRT VS2008): `[0x12705BC]`=_crtheap,
+   `[0x1270948]`=modo (1=HeapAlloc direto, 3=tenta SBH 0xECD178),
+   `[0x1270938]`=limite SBH; `call [0xFDF1A0]`=HeapAlloc IAT.
+   0xECD1165/0xED1165 = `_getptd` (FlsGetValue/TlsGetValue no index
+   `[0x11C1CBC]`; fallback calloc(1, 0x214)+FlsSetValue).
+7. **TLS shim: `g_tls_vals` e' um array GLOBAL — nao por-thread.** O
+   contrato do Windows e' por-thread (slot vazio = NULL por thread).
+   O CRT confia nisso pro per-thread data. Registrar como debito
+   tecnico se threads guest acessarem TLS-index diferentes.
+8. Backtrace symbolizado (run #90b, nm -n no artefato):
+   main → recomp_host_run → hle_call_guest → 00ECC4DB → 0086A850
+   (**WinMain**) → 00BC2940 → 00B4E270 → 00AA13E0 (operator new) →
+   00AA30C0 → 00AA3810 → **00AA35A0+0x70d (fault, codigo liftado)**.
+   A thread do fault e' a MAIN (o worker sub_00AA64D0 nao aparece).
+   `si_addr=0x10` = deref de VA 0x10 (unmapped, abaixo da imagem).
