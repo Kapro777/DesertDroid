@@ -1,0 +1,40 @@
+From b5efaf92132d7ca39cd4787d38c978c25ca24a4e Mon Sep 17 00:00:00 2001
+From: tiny <tiny@localhost>
+Date: Mon, 26 Oct 2026 11:04:46 -0400
+Subject: [PATCH] guest_mem: expor guest_mem_used() (bump da arena) para
+ diagnostico de esgotamento no crash dump
+
+---
+ runtime/win32hle/guest_mem.c | 6 ++++++
+ runtime/win32hle/guest_mem.h | 3 +++
+ 2 files changed, 9 insertions(+)
+
+diff --git a/runtime/win32hle/guest_mem.c b/runtime/win32hle/guest_mem.c
+index b3b3281..8719adc 100644
+--- a/runtime/win32hle/guest_mem.c
++++ b/runtime/win32hle/guest_mem.c
+@@ -89,3 +89,9 @@ void *guest_ptr(uint32_t va)
+ {
+     return (void *)(uintptr_t)va;
+ }
++
++/* Bytes ja consumidos do bump (diagnostico de esgotamento). */
++uint64_t guest_mem_used(void)
++{
++    return g_arena_ok ? g_bump : 0;
++}
+diff --git a/runtime/win32hle/guest_mem.h b/runtime/win32hle/guest_mem.h
+index 3f0036d..4dc7c59 100644
+--- a/runtime/win32hle/guest_mem.h
++++ b/runtime/win32hle/guest_mem.h
+@@ -29,4 +29,7 @@ uint32_t guest_alloc_at(uint32_t va, size_t size);
+ /* VA de guest -> ponteiro host (no modelo flat e o proprio endereco). */
+ void *guest_ptr(uint32_t va);
+ 
++/* Bytes ja consumidos do bump (diagnostico de esgotamento). */
++uint64_t guest_mem_used(void);
++
+ #endif
+-- 
+2.47.3
+
