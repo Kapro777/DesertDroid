@@ -11,5 +11,6 @@
 00A5B5A0 format-string (buffer, id) — string vazia + buffer como retorno
 00A5B270 format-chain pre-MM — responde string vazia (mesmo contrato do 00A5B5A0)
 00A5B690 strlen/string lookup — retorna 0 (string vazia)
+00AA30C0 fast path MM (vtable+0x04) — bypass: roteia pro path geral 0xAA1130 (slab scan crasha em 0x10/livelock; free/realloc ja usam fallback CRT)
 00EC61C0 memset CRT — nativo do host (tail-jmp liftado suspeito do desalinhamento)
 00EC44D0 memmove CRT — nativo do host

@@ -22,6 +22,7 @@ extern uint32_t g_eax;
 extern void dd_overrides_add(uint32_t va, recomp_func_t fn);
 static void dd_ovr_00A5B270(void);
 static void dd_ovr_00A5B690(void);
+static void dd_ovr_00AA30C0(void);
 uint32_t dd_tls_slot_value(uint32_t idx);
 
 /* _initterm real = sub_00ECCCF0 (catalogado); args do original:
@@ -138,8 +139,62 @@ void dd_crt_overrides_register(void)
     dd_overrides_add(0x00EC44D0u, dd_ovr_memcpy);   /* memmove        */
     dd_overrides_add(0x00A5B270u, dd_ovr_00A5B270); /* format-chain: "" */
     dd_overrides_add(0x00A5B690u, dd_ovr_00A5B690); /* strlen: string vazia */
+    dd_overrides_add(0x00AA30C0u, dd_ovr_00AA30C0); /* fast path MM -> geral */
     fprintf(stderr, "[DesertDroid] overrides CRT registrados "
             "(00ECCD14, 00A5B5A0, memset/memcpy nativos)\n");
+}
+
+/* sub_00AA30C0 (vtable+0x04 do MM): fast path de alocacao via slabs do
+ * pool ([0x11F622C]). O scan do 0xAA35A0 le [slab+8]/[slab+0xC] e cruza
+ * para pagina NULL (crash 0x10) ou livelock (run #91 sob GDB). Override:
+ * roteia TUDO para o path geral PROVADO (0xAA1130 -> cmd 0xD -> 0xAA3300
+ * real -> 0xAA3E40 -> fallback CRT 0xECD1C7 -> HeapAlloc), replicando as
+ * duas convencoes de bloco do original:
+ *   - elegivel ao fast path (align==4, arg4==0, tipo!=7/8, size+4<=0x100):
+ *     aloca size+4, escreve header de size, retorna bloco+4 (bl=1)
+ *   - caso contrario: aloca size, retorna bloco cru (bl=0)
+ * Free/realloc nao sao afetados: roteiam pelo range do pool (nunca batem)
+ * e caem no fallback CRT — verificado no disassembly do 0xAA3370/0xAA33A0. */
+static void dd_ovr_00AA30C0(void)
+{
+    extern uint32_t dd_mem32(uint32_t va);
+    extern uint32_t g_esp;
+    uint32_t size_ptr = dd_mem32(g_esp + 4);
+    uint32_t desc_ptr = dd_mem32(g_esp + 8);
+    uint32_t type     = dd_mem32(g_esp + 0xC);
+    uint32_t arg4     = dd_mem32(g_esp + 0x10);
+    uint32_t size  = dd_mem32(size_ptr);
+    uint32_t align = dd_mem32(desc_ptr);
+    if (align == 4u && arg4 == 0u && type != 7u && type != 8u &&
+        size + 4u <= 0x100u) {
+        *(uint32_t *)(uintptr_t)size_ptr = size + 4u;  /* side-effect original */
+        uint32_t args[2] = { size + 4u, 4u };
+        uint32_t blk = hle_call_guest(0x00AA1130u, 2, args);
+        if (blk == 0u) {
+            g_eax = 0u;
+        } else {
+            *(uint32_t *)(uintptr_t)blk = size + 4u;    /* header de size  */
+            g_eax = blk + 4u;                           /* usuario = blk+4 */
+        }
+        {
+            static uint32_t n = 0;
+            if (n < 3)
+                fprintf(stderr, "[DesertDroid] 00AA30C0 bypass: size=%u blk=%#x\n",
+                        size + 4u, blk);
+            n++;
+        }
+    } else {
+        uint32_t args[2] = { size, align };
+        g_eax = hle_call_guest(0x00AA1130u, 2, args);  /* bloco cru */
+        {
+            static uint32_t n = 0;
+            if (n < 3)
+                fprintf(stderr, "[DesertDroid] 00AA30C0 bypass geral: size=%u align=%u -> %#x\n",
+                        size, align, g_eax);
+            n++;
+        }
+    }
+    g_esp += 4u + 0x1Cu;   /* ret 0x1C: pop ret + 7 args do thiscall do jogo */
 }
 
 /* sub_00A5B270: elo da cadeia format-string (00A5B270 -> 00A5B4B0 ->
