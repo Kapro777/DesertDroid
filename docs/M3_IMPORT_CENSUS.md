@@ -17,7 +17,12 @@ eventos/semáforos/mutex (Create/Set/Reset/Release/Wait*), arquivos
 (FindFirst/Next, Copy/Delete/Move, GetFullPathName, attributes, sizes),
 tempo (System/Local/FileTime conversions, QPC), locale/código-página,
 Interlocked* (atómicos nativos), VirtualQuery, console (Write/Get*),
-IsDebuggerPresent/DebugBreak (retornos mansos), HeapCreate.
+DebugBreak (retorno manso), HeapCreate.
+
+**Delta de bring-up (2026-10-28):** `IsDebuggerPresent` já foi adicionado a
+`src/host/dd_kernel32.c` e retorna `FALSE`, comportamento esperado sem
+ depurador. O próximo smoke boot precisa confirmar que o jogo passa desse
+ponto; a contagem acima é o censo-base anterior a esse ajuste.
 → Implementação sobre pthread/POSIX no estilo já usado por kernel32.c.
 
 ## d3dx9_38.dll (25) — implementar em C
