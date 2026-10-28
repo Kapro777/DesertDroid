@@ -11,12 +11,36 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <sched.h>
 #include "win32hle.h"
 
 extern uint32_t hle_call_guest(uint32_t va, int nargs, const uint32_t *args);
+extern void mach_enter(void);
 extern void mach_leave(void);
+extern int  mach_depth(void);
+extern void (*recomp_yield_hook)(void);   /* RECOMP_WEAK no recomp_types.h */
 
 typedef struct { uint32_t start, param; } dd_thread_arg;
+
+/* Entrega da maquina num backedge (RECOMP_BACKEDGE a cada 0x10000 loops):
+ * solta o machine lock no claim MAIS EXTERNO, da uma fatia ao escalonador
+ * e reivindica. Sem isso a main thread segura a maquina para sempre e as
+ * worker threads do jogo morrem de fome no trampolim (run #91/#92: a
+ * worker sub_00AA64D0 criada no boot nunca rodou; a main ficou 300s
+ * presa em sub_00A642A0). Mesma regra do native32_yield do pcrecomp. */
+static void dd_yield(void)
+{
+    if (mach_depth() != 1) return;   /* aninhado: maquina detida mais acima */
+    mach_leave();
+    sched_yield();
+    mach_enter();
+}
+
+void dd_yield_hook_install(void)
+{
+    recomp_yield_hook = dd_yield;
+    fprintf(stderr, "[DesertDroid] yield hook instalado (coop a cada 0x10000 backedges)\n");
+}
 
 static void *dd_thread_trampoline(void *p)
 {
@@ -67,4 +91,5 @@ static const win32hle_shim dd_shims_threads[] = {
 void dd_threads_register(void)
 {
     win32hle_register(dd_shims_threads);
+    dd_yield_hook_install();     /* worker threads precisam de fatias */
 }

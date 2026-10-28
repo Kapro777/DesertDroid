@@ -63,11 +63,24 @@ static void k_InitializeCriticalSectionAndSpinCount(void)
     RET(1, 2);
 }
 
-/* EnterCriticalSection(LPCRITICAL_SECTION) */
+/* EnterCriticalSection(LPCRITICAL_SECTION)
+ * Com o yield hook ativo, a maquina pode ser entregue DENTRO de uma
+ * secao critica (backedge de um loop interno). Se a outra thread tenta
+ * a MESMA CS enquanto detem a maquina, o pthread_mutex_lock bloquearia
+ * com a maquina detida = deadlock. Fast path: trylock. Se disputado,
+ * solta a maquina, bloqueia e reivindica (padrao native32). */
 static void k_EnterCriticalSection(void)
 {
     pthread_mutex_t *m = cs_from(A32(0));
-    if (m) pthread_mutex_lock(m);
+    if (m) {
+        extern void mach_enter(void);
+        extern void mach_leave(void);
+        if (pthread_mutex_trylock(m) != 0) {
+            mach_leave();
+            pthread_mutex_lock(m);
+            mach_enter();
+        }
+    }
     RETV(1);
 }
 
