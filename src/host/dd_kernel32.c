@@ -180,7 +180,27 @@ uint32_t dd_tls_slots_snapshot(uint32_t *out, uint32_t n)
 /* ---- heap/handle ---- */
 static void k_HeapCreate(void) { RET(0x00D0D000u, 3); }   /* handle fake       */
 static void k_HeapSetInformation(void) { RET(1, 4); }     /* HeapSetInformation? nao importado; reserva */
-static void k_TerminateProcess(void) { _exit((int)A32(1)); }
+static void k_TerminateProcess(void)
+{
+    uint32_t process = A32(0);
+    uint32_t exit_code = A32(1);
+    extern uint32_t g_cur_func;
+    extern uint32_t g_eax, g_ecx, g_edx, g_ebx, g_ebp, g_esi, g_edi, g_esp;
+    extern const char *g_cur_import;
+    extern void dd_trace_dump(void);
+
+    fprintf(stderr,
+            "[TerminateProcess] handle=%#x exit_code=%u (%#x) caller=sub_%08X import=%s\\n",
+            process, exit_code, exit_code, g_cur_func,
+            g_cur_import ? g_cur_import : "-");
+    fprintf(stderr,
+            "[TerminateProcess] regs eax=%08X ecx=%08X edx=%08X ebx=%08X\\n"
+            "                  esp=%08X ebp=%08X esi=%08X edi=%08X\\n",
+            g_eax, g_ecx, g_edx, g_ebx, g_esp, g_ebp, g_esi, g_edi);
+    dd_trace_dump();
+    fflush(stderr);
+    _exit((int)exit_code);
+}
 
 /* ---- modulo/console ---- */
 static void k_GetModuleHandleW(void) { RET(0x00400000u, 1); }
