@@ -107,11 +107,11 @@ def cmd_lift(exe, catalog, outdir, split=400, names_path=None, prefix=""):
     cfg = os.path.join(HERE, "..", "config")
     overrides = read_va_list(os.path.join(cfg, "overrides.txt"))
     excluded = read_va_list(os.path.join(cfg, "exclude.txt"))
-    hooks = read_va_list(os.path.join(cfg, "hooks.txt"))
+    # The pinned pcrecomp Lifter has no hook_sites option; hook injection
+    # is handled by the native runtime, not by the x86-to-C lifting API.
     md = Cs(CS_ARCH_X86, CS_MODE_32)
     md.detail = True
-    lifter = Lifter(iat_map=iat, func_names={}, lifted=lifted, precise_carry=True,
-                    hook_sites=set(hooks))
+    lifter = Lifter(iat_map=iat, func_names={}, lifted=lifted, precise_carry=True)
     os.makedirs(outdir, exist_ok=True)
     for fn in os.listdir(outdir):
         if fn.startswith(prefix + "recomp_") and fn.endswith((".c", ".h")):
