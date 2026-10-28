@@ -190,12 +190,12 @@ static void k_TerminateProcess(void)
     extern void dd_trace_dump(void);
 
     fprintf(stderr,
-            "[TerminateProcess] handle=%#x exit_code=%u (%#x) caller=sub_%08X import=%s\\n",
+            "[TerminateProcess] handle=%#x exit_code=%u (%#x) caller=sub_%08X import=%s\n",
             process, exit_code, exit_code, g_cur_func,
             g_cur_import ? g_cur_import : "-");
     fprintf(stderr,
-            "[TerminateProcess] regs eax=%08X ecx=%08X edx=%08X ebx=%08X\\n"
-            "                  esp=%08X ebp=%08X esi=%08X edi=%08X\\n",
+            "[TerminateProcess] regs eax=%08X ecx=%08X edx=%08X ebx=%08X\n"
+            "                  esp=%08X ebp=%08X esi=%08X edi=%08X\n",
             g_eax, g_ecx, g_edx, g_ebx, g_esp, g_ebp, g_esi, g_edi);
     dd_trace_dump();
     fflush(stderr);
