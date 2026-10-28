@@ -275,6 +275,9 @@ static void k_DecodePointer(void) {
 }
 
 /* IsProcessorFeaturePresent(n) — via GetProcAddress; coerente com o CPUID */
+/* IsDebuggerPresent(void): o host não está depurando o processo guest. */
+static void k_IsDebuggerPresent(void) { RET(0, 0); }
+
 static void k_IsProcessorFeaturePresent(void)
 {
     uint32_t f = A32(0);
@@ -504,6 +507,7 @@ static const win32hle_shim dd_shims_kernel32[] = {
     { "SuspendThread",        k_SuspendThread },
     { "GetExitCodeThread",     k_GetExitCodeThread },
     { "IsProcessorFeaturePresent", k_IsProcessorFeaturePresent },
+    { "IsDebuggerPresent",         k_IsDebuggerPresent },
     { "EncodePointer",           k_EncodePointer },
     { "DecodePointer",           k_DecodePointer },
     /* FLS = TLS no nosso modelo (o CRT VS2008 procura via GetProcAddress) */
