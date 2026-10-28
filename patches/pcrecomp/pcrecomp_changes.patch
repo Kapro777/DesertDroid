@@ -1,0 +1,1029 @@
+diff --git a/runtime/native32/native32.c b/runtime/native32/native32.c
+index cf795cf..6cae03d 100644
+--- a/runtime/native32/native32.c
++++ b/runtime/native32/native32.c
+@@ -11,6 +11,7 @@
+ #include "native32.h"
+ #include "image_loader.h"
+ #include "recomp_trace.h"
++#pragma comment(lib, "synchronization.lib")
+ 
+ #if !defined(_MSC_VER) || !defined(_M_IX86)
+ #error "native32 is MSVC x86 only: the bridge and the callback trampoline are inline asm"
+@@ -24,6 +25,8 @@ int       g_fp_top;
+ uint16_t  g_fpu_cw = 0x027F;
+ uint16_t  g_seg_cs, g_seg_ds, g_seg_es, g_seg_fs, g_seg_gs, g_seg_ss;
+ uint64_t  g_mm[8];
++V128      g_xmm[8];
++uint32_t  g_mxcsr = 0x1F80;
+ uint32_t  g_fs_base, g_gs_base;
+ ptrdiff_t g_mem_base = 0;
+ uint32_t  g_cur_func;
+@@ -31,6 +34,15 @@ uint32_t  g_icall_trace[ICALL_TRACE_SIZE], g_icall_from[ICALL_TRACE_SIZE];
+ uint32_t  g_icall_trace_idx, g_icall_count;
+ 
+ int native32_trace_native, native32_trace_callbacks;
++native32_post_hook_t native32_post_hook;
++native32_pre_hook_t  native32_pre_hook;
++
++/* The last native calls, for a crash report: which import ran, from which
++ * lifted function, with what first arguments and what it returned. One
++ * slot is written per bridge crossing; a racing writer on another thread can
++ * at worst garble one slot of a diagnostic. */
++native32_call_rec_t g_native_ring[NATIVE32_RING];
++volatile uint32_t   g_native_ring_idx;
+ 
+ typedef struct {
+     uint32_t eax, ecx, edx, esp, ebx, esi, edi, ebp, fs, cur;
+@@ -38,6 +50,12 @@ typedef struct {
+     int      fp_top;
+     uint16_t fpu_cw;
+     uint64_t mm[8];
++    /* SSE state and the flags a function returns with. Without them a guest
++     * thread that yields mid-loop (RECOMP_BACKEDGE) or is preempted at a
++     * native call came back to another thread's xmm registers. */
++    V128     xmm[8];
++    uint32_t mxcsr;
++    uint32_t flag_k, flag_a, flag_b, flag_cf;
+ } regs_t;
+ 
+ static void regs_save(regs_t* r) {
+@@ -46,6 +64,8 @@ static void regs_save(regs_t* r) {
+     r->fs = g_fs_base; r->cur = g_cur_func;
+     memcpy(r->st, g_st, sizeof g_st); r->fp_top = g_fp_top; r->fpu_cw = g_fpu_cw;
+     memcpy(r->mm, g_mm, sizeof g_mm);
++    memcpy(r->xmm, g_xmm, sizeof g_xmm); r->mxcsr = g_mxcsr;
++    r->flag_k = g_flag_k; r->flag_a = g_flag_a; r->flag_b = g_flag_b; r->flag_cf = g_flag_cf;
+ }
+ 
+ static void regs_load(const regs_t* r) {
+@@ -54,11 +74,43 @@ static void regs_load(const regs_t* r) {
+     g_fs_base = r->fs; g_cur_func = r->cur;
+     memcpy(g_st, r->st, sizeof g_st); g_fp_top = r->fp_top; g_fpu_cw = r->fpu_cw;
+     memcpy(g_mm, r->mm, sizeof g_mm);
++    memcpy(g_xmm, r->xmm, sizeof g_xmm); g_mxcsr = r->mxcsr;
++    g_flag_k = r->flag_k; g_flag_a = r->flag_a; g_flag_b = r->flag_b; g_flag_cf = r->flag_cf;
+ }
+ 
+ /* ------------------------------------------------------------- machine lock */
+ 
+-static CRITICAL_SECTION g_mach;
++/* The machine lock is a FIFO ticket lock, recursive per thread.
++ *
++ * It was a CRITICAL_SECTION, which is not fair: a thread that releases it and
++ * asks again a moment later gets it back ahead of anyone already waiting. The
++ * game thread releases the machine around every native call -- tens of
++ * thousands of times a second in a D3D9 game -- and immediately re-takes it,
++ * so a guest audio mixer thread waiting for the machine starved and the sound
++ * stuttered (NFS Underground 2). A ticket lock hands the machine to the
++ * longest waiter at every release. */
++static volatile LONG g_tk_next, g_tk_serving;
++static volatile DWORD g_tk_owner;
++static int g_tk_depth;
++static void mach_lock(void) {
++    DWORD me = GetCurrentThreadId();
++    if (g_tk_owner == me) { g_tk_depth++; return; }
++    LONG t = InterlockedIncrement(&g_tk_next) - 1;
++    for (int spin = 0; g_tk_serving != t; spin++) {
++        LONG cur = g_tk_serving;
++        if (cur == t) break;
++        if (spin < 64) YieldProcessor();
++        else WaitOnAddress(&g_tk_serving, &cur, sizeof cur, 1);
++    }
++    g_tk_owner = me;
++    g_tk_depth = 1;
++}
++static void mach_unlock(void) {
++    if (--g_tk_depth) return;
++    g_tk_owner = 0;
++    InterlockedIncrement(&g_tk_serving);
++    WakeByAddressAll((void*)&g_tk_serving);
++}
+ static DWORD g_mach_tls = TLS_OUT_OF_INDEXES;
+ 
+ /* Argument slots copied per call. Reading past a callee's real arguments is
+@@ -87,7 +139,7 @@ typedef struct { regs_t r; int depth; } mstate;
+ /* Nests: a callback that arrives while this thread is inside a native call
+  * claims again, and only the outermost claim loads the saved state. */
+ void mach_enter(void) {
+-    EnterCriticalSection(&g_mach);
++    mach_lock();
+     mstate* m = (mstate*)TlsGetValue(g_mach_tls);
+     if (!m) {
+         /* Stack left for a fault handler after an overflow: without it the
+@@ -105,6 +157,7 @@ void mach_enter(void) {
+         m->r.esp = lo + GUEST_STACK - BRIDGE_SLOTS * 4 - 64;
+         m->r.fs = make_tib(lo, lo + GUEST_STACK);
+         m->r.fpu_cw = 0x027F;
++        m->r.mxcsr = 0x1F80;
+         TlsSetValue(g_mach_tls, m);
+     }
+     if (m->depth++ == 0) regs_load(&m->r);
+@@ -113,7 +166,7 @@ void mach_enter(void) {
+ void mach_leave(void) {
+     mstate* m = (mstate*)TlsGetValue(g_mach_tls);
+     if (--m->depth == 0) regs_save(&m->r);
+-    LeaveCriticalSection(&g_mach);
++    mach_unlock();
+ }
+ 
+ /* RECOMP_BACKEDGE's hand-over: let another guest thread take the machine.
+@@ -190,16 +243,31 @@ uint32_t native32_export(uint32_t base, const char* name) {
+ static struct { uint32_t va; char name[60]; } g_names[MAX_NAMES];
+ static int g_name_n;
+ 
++/* Open-addressed index over g_names: native32_name runs on every bridge
++ * crossing (g_cur_import), and a linear scan over thousands of COM method
++ * names was measurable in a D3D9 game's frame time. */
++#define NAME_HASH 16384
++static int16_t g_name_idx[NAME_HASH];   /* 0 = empty, else index + 1 */
++static uint32_t name_slot(uint32_t va) { return (va * 2654435761u) >> 18; }
+ const char* native32_name(uint32_t va) {
+-    for (int i = 0; i < g_name_n; i++)
+-        if (g_names[i].va == va) return g_names[i].name;
++    for (uint32_t h = name_slot(va), n = 0; n < NAME_HASH; h = (h + 1) & (NAME_HASH - 1), n++) {
++        int i = g_name_idx[h];
++        if (!i) return NULL;
++        if (g_names[i - 1].va == va) return g_names[i - 1].name;
++    }
+     return NULL;
+ }
+ 
+-static void add_name(uint32_t va, const char* dll, const char* fn) {
++void native32_add_name(uint32_t va, const char* dll, const char* fn);
++static void add_name(uint32_t va, const char* dll, const char* fn) { native32_add_name(va, dll, fn); }
++void native32_add_name(uint32_t va, const char* dll, const char* fn) {
+     if (g_name_n < MAX_NAMES && !native32_name(va)) {
+         _snprintf(g_names[g_name_n].name, sizeof g_names[0].name - 1, "%s!%s", dll, fn);
+-        g_names[g_name_n++].va = va;
++        g_names[g_name_n].va = va;
++        uint32_t h = name_slot(va);
++        while (g_name_idx[h]) h = (h + 1) & (NAME_HASH - 1);
++        g_name_idx[h] = (int16_t)(g_name_n + 1);
++        g_name_n++;
+     }
+ }
+ 
+@@ -226,7 +294,7 @@ static void native_bridge(void) {
+     const char* saved_import = g_cur_import;
+     if (native32_trace_native) {
+         const char* n = native32_name(fn);
+-        fprintf(stderr, "[native] %-32s (%08X %08X %08X %08X) from sub_%08X",
++        fprintf(stderr, "[native] t%-5lu %-32s (%08X %08X %08X %08X) from sub_%08X", GetCurrentThreadId(),
+                 n ? n : "?", src[0], src[1], src[2], src[3], g_cur_func);
+         if (!n) fprintf(stderr, " @%08X", fn);
+         for (int k = 0; k < 4; k++) {       /* arguments that are strings (gunman) */
+@@ -241,7 +309,13 @@ static void native_bridge(void) {
+                 fprintf(stderr, " a%d=\"%.*s\"", k, (int)len, p);
+         }
+     }
++    /* The host may rewrite the guest's argument slots before the call (e.g.
++     * presentation parameters behind a pointer), still holding the machine. */
++    if (native32_pre_hook) native32_pre_hook(fn, src);
+     g_cur_import = native32_name(fn);
++    native32_call_rec_t* rec = &g_native_ring[g_native_ring_idx++ & (NATIVE32_RING - 1)];
++    rec->target = fn; rec->from = g_cur_func; rec->tid = GetCurrentThreadId();
++    rec->a0 = src[0]; rec->a1 = src[1]; rec->a2 = src[2]; rec->ret = 0xFFFFFFFFu; rec->done = 0;
+     if (!g_cur_import) g_cur_import = "(native)";
+     mach_leave();
+     SetLastError(guest_error);
+@@ -295,6 +369,8 @@ static void native_bridge(void) {
+     g_eax = r_eax;
+     g_edx = r_edx;
+     g_esp += 4 + purge;
++    rec->ret = r_eax; rec->done = 1;
++    if (native32_post_hook) native32_post_hook(fn, src, r_eax);
+     if (native32_trace_native) fprintf(stderr, " -> %08X\n", r_eax);
+     SetLastError(last_error);
+ }
+@@ -471,7 +547,6 @@ static LONG CALLBACK native32_veh(EXCEPTION_POINTERS* ep) {
+ /* ---------------------------------------------------------------- setup */
+ 
+ void native32_init(void) {
+-    InitializeCriticalSection(&g_mach);
+     recomp_yield_hook = native32_yield;
+     g_mach_tls = TlsAlloc();
+     g_shim_page = (uint32_t)(uintptr_t)VirtualAlloc(NULL, 0x10000, MEM_RESERVE, PAGE_NOACCESS);
+diff --git a/runtime/native32/native32.h b/runtime/native32/native32.h
+index fda6994..39ec227 100644
+--- a/runtime/native32/native32.h
++++ b/runtime/native32/native32.h
+@@ -76,6 +76,28 @@ extern int native32_trace_callbacks;  /* one line per Windows -> guest call */
+ /* Guest address ranges known to the runtime (for fault reports). */
+ int native32_in_guest(uint32_t va);
+ 
++/* Called after every native call made through the bridge (imports, COM
++ * methods, GetProcAddress results): the target, the guest's argument slots
++ * (args[0] is a COM method's `this`), and eax. For tracing an API surface --
++ * e.g. naming a COM vtable once the object that owns it is returned. Runs on
++ * the calling thread with the machine held; must not touch guest registers. */
++typedef void (*native32_post_hook_t)(uint32_t target, const uint32_t* args, uint32_t ret);
++extern native32_post_hook_t native32_post_hook;
++
++/* Called before every bridged native call with the guest's argument slots,
++ * which it may modify (they are guest stack memory). */
++typedef void (*native32_pre_hook_t)(uint32_t target, uint32_t* args);
++extern native32_pre_hook_t native32_pre_hook;
++
++/* Give a native address a name for traces and crash reports ("dll!fn"). */
++void native32_add_name(uint32_t va, const char* dll, const char* fn);
++
++/* Ring of the last native (import / COM / GetProcAddress) calls. */
++#define NATIVE32_RING 64
++typedef struct { uint32_t target, from, tid, a0, a1, a2, ret, done; } native32_call_rec_t;
++extern native32_call_rec_t g_native_ring[NATIVE32_RING];
++extern volatile uint32_t   g_native_ring_idx;
++
+ /* Print the last indirect calls, newest first. */
+ void native32_dump_icalls(int n);
+ 
+diff --git a/runtime/recomp32/recomp_simd.h b/runtime/recomp32/recomp_simd.h
+new file mode 100644
+index 0000000..a4518ba
+--- /dev/null
++++ b/runtime/recomp32/recomp_simd.h
+@@ -0,0 +1,81 @@
++/*
++ * recomp_simd.h - the SSE register file and helpers behind tools/lift/simd32.py.
++ *
++ * Included by recomp_types.h. One V128 type serves both register files: an
++ * MMX operand is a V128 whose high quadword is ignored, so every packed
++ * integer op is written once and works at 64 or 128 bits.
++ *
++ * Memory goes through ADDR() like every other lifted access, with memcpy so an
++ * unaligned m128 (movups) is fine and no host alignment rule is assumed -- the
++ * same code has to compile for ARM64, where the guest image is not at its VA.
++ */
++#ifndef RECOMP_SIMD_H
++#define RECOMP_SIMD_H
++#include <stdint.h>
++#include <string.h>
++#include <math.h>
++
++typedef union {
++    float    f32[4];
++    double   f64[2];
++    uint8_t  u8[16];
++    int8_t   i8[16];
++    uint16_t u16[8];
++    int16_t  i16[8];
++    uint32_t u32[4];
++    int32_t  i32[4];
++    uint64_t u64[2];
++    int64_t  i64[2];
++} V128;
++
++extern V128     g_xmm[8];
++extern uint32_t g_mxcsr;          /* only the rounding field (bits 13-14) is honoured */
++
++static inline V128 v128_q(uint64_t q) { V128 v; v.u64[0] = q; v.u64[1] = 0; return v; }
++static inline V128 v128_d(uint32_t d) { V128 v; memset(&v, 0, sizeof v); v.u32[0] = d; return v; }
++
++static inline V128     rdv128(uint32_t va) { V128 v; memcpy(&v, (const void *)ADDR(va), 16); return v; }
++static inline void     wrv128(uint32_t va, V128 v) { memcpy((void *)ADDR(va), &v, 16); }
++static inline uint64_t rdm64(uint32_t va) { uint64_t v; memcpy(&v, (const void *)ADDR(va), 8); return v; }
++static inline void     wrm64(uint32_t va, uint64_t v) { memcpy((void *)ADDR(va), &v, 8); }
++static inline uint32_t rdm32(uint32_t va) { uint32_t v; memcpy(&v, (const void *)ADDR(va), 4); return v; }
++static inline void     wrm32(uint32_t va, uint32_t v) { memcpy((void *)ADDR(va), &v, 4); }
++static inline float    rdmf32(uint32_t va) { float v; memcpy(&v, (const void *)ADDR(va), 4); return v; }
++static inline double   rdmf64(uint32_t va) { double v; memcpy(&v, (const void *)ADDR(va), 8); return v; }
++
++/* Saturation, the lane's own range. The sum or difference is computed a width
++ * up, so the clamp can see the overflow. */
++static inline int32_t simd_sat_i8 (int32_t v) { return v > 127 ? 127 : v < -128 ? -128 : v; }
++static inline int32_t simd_sat_u8 (int32_t v) { return v > 255 ? 255 : v < 0 ? 0 : v; }
++static inline int32_t simd_sat_i16(int32_t v) { return v > 32767 ? 32767 : v < -32768 ? -32768 : v; }
++static inline int32_t simd_sat_u16(int32_t v) { return v > 65535 ? 65535 : v < 0 ? 0 : v; }
++
++/* float -> int32. Out of range (and NaN) is the "integer indefinite" value
++ * 0x80000000, where a C cast is undefined behaviour. */
++static inline int32_t simd_cvtt_i32(double v) {
++    return (v >= -2147483648.0 && v < 2147483648.0) ? (int32_t)v : (int32_t)0x80000000;
++}
++static inline int32_t simd_cvt_i32(double v) {
++    double r;
++    switch ((g_mxcsr >> 13) & 3) {
++    case 0:  /* to nearest, ties to even -- computed, not taken from the host's mode */
++             r = floor(v + 0.5);
++             if (r - v == 0.5 && fmod(r, 2.0) != 0.0) r -= 1.0;
++             break;
++    case 1:  r = floor(v); break;
++    case 2:  r = ceil(v); break;
++    default: r = trunc(v); break;
++    }
++    return simd_cvtt_i32(r);
++}
++
++/* (U)COMISS/SD: an EFLAGS image for the lifter's FK_EFLAGS state.
++ * unordered ZF=PF=CF=1; less CF=1; equal ZF=1; OF/SF/AF cleared. */
++static inline uint32_t simd_comi_eflags(double a, double b) {
++    if (a != a || b != b) return 0x45u;
++    if (a < b) return 0x01u;
++    if (a == b) return 0x40u;
++    return 0u;
++}
++
++#endif
+diff --git a/runtime/recomp32/recomp_types.h b/runtime/recomp32/recomp_types.h
+index be47de1..d3b781d 100644
+--- a/runtime/recomp32/recomp_types.h
++++ b/runtime/recomp32/recomp_types.h
+@@ -43,7 +43,27 @@ extern uint32_t g_ebx, g_esi, g_edi, g_ebp;
+  * like __ftol receive their argument on the FPU stack from the caller, and the
+  * control word persists across calls. A per-function local stack would make every
+  * cross-call FPU value read as 0. */
++#ifdef RECOMP_X87_WINDOW
++/* Opt-in: ST(0..7) are a window sliding over a buffer, so fp_push/fp_pop move
++ * one index instead of shifting all eight registers and their int64 shadows
++ * (~32 memory operations per push or pop in x87-heavy code). g_st and g_st_i64
++ * stay usable as arrays: g_st[i] is ST(i). Every translation unit of a program
++ * (lifted code and runtime) must agree on this macro; the header defines the
++ * storage (weak), so a runtime must not define g_st itself. */
++#define RECOMP_X87_SLOTS 256
++#if defined(_MSC_VER)
++#define RECOMP_X87_DATA __declspec(selectany)
++#else
++#define RECOMP_X87_DATA __attribute__((weak))
++#endif
++RECOMP_X87_DATA double  g_st_win[RECOMP_X87_SLOTS];
++RECOMP_X87_DATA int64_t g_st_i64_win[RECOMP_X87_SLOTS];
++RECOMP_X87_DATA int     g_fp_sp = RECOMP_X87_SLOTS / 2;
++#define g_st     (g_st_win + g_fp_sp)
++#define g_st_i64 (g_st_i64_win + g_fp_sp)
++#else
+ extern double   g_st[8];
++#endif
+ extern int      g_fp_top;
+ extern uint16_t g_fpu_cw;
+ 
+@@ -108,6 +128,9 @@ extern const uint32_t recomp_dispatch_count;
+ #define RECOMP_REGS_OUT() ((void)0)
+ #define RECOMP_REGS_IN() ((void)0)
+ #endif
++/* The one way out of a lifted function body: the registers go back to the
++ * globals first when they are locals. */
++#define RECOMP_RETURN() do { RECOMP_REGS_OUT(); return; } while (0)
+ 
+ #if defined(RECOMP_GENERATED_CODE) && !defined(RECOMP_LOCAL_REGS)
+ #define eax g_eax
+@@ -177,12 +200,37 @@ extern uint32_t g_gs_base;
+ #define FS_BASE  g_fs_base
+ #define GS_BASE  g_gs_base
+ 
+-#define MEM8(addr)   (*(volatile uint8_t  *)ADDR(addr))
+-#define MEM16(addr)  (*(volatile uint16_t *)ADDR(addr))
+-#define MEM32(addr)  (*(volatile uint32_t *)ADDR(addr))
+-#define MEM64(addr)  (*(volatile uint64_t *)ADDR(addr))
+-#define MEMF(addr)   (*(volatile float    *)ADDR(addr))
+-#define MEMD(addr)   (*(volatile double   *)ADDR(addr))
++/* RECOMP_MEM_QUAL qualifies every guest memory access. `volatile` (the
++ * default) keeps each access exactly as the x86 performed it, which is safe
++ * and slow: no load is combined, kept in a register or reordered. A host that
++ * compiles the lifted code with optimisation can define it empty -- the
++ * lifted loops still make an opaque call per back-edge (RECOMP_BACKEDGE), so a
++ * guest spin-wait keeps reloading its flag -- and should then also build with
++ * -fno-strict-aliasing, since guest memory is one untyped byte array.
++ * Non-x86 hosts get byte-aligned access types: guest data is not aligned the
++ * way the host compiler would otherwise assume. */
++#ifndef RECOMP_MEM_QUAL
++#define RECOMP_MEM_QUAL volatile
++#endif
++#if (defined(__clang__) || defined(__GNUC__)) && !defined(__i386__) && !defined(__x86_64__)
++typedef uint16_t __attribute__((aligned(1))) recomp_u16_una;
++typedef uint32_t __attribute__((aligned(1))) recomp_u32_una;
++typedef uint64_t __attribute__((aligned(1))) recomp_u64_una;
++typedef float    __attribute__((aligned(1))) recomp_f32_una;
++typedef double   __attribute__((aligned(1))) recomp_f64_una;
++#else
++typedef uint16_t recomp_u16_una;
++typedef uint32_t recomp_u32_una;
++typedef uint64_t recomp_u64_una;
++typedef float    recomp_f32_una;
++typedef double   recomp_f64_una;
++#endif
++#define MEM8(addr)   (*(RECOMP_MEM_QUAL uint8_t        *)ADDR(addr))
++#define MEM16(addr)  (*(RECOMP_MEM_QUAL recomp_u16_una *)ADDR(addr))
++#define MEM32(addr)  (*(RECOMP_MEM_QUAL recomp_u32_una *)ADDR(addr))
++#define MEM64(addr)  (*(RECOMP_MEM_QUAL recomp_u64_una *)ADDR(addr))
++#define MEMF(addr)   (*(RECOMP_MEM_QUAL recomp_f32_una *)ADDR(addr))
++#define MEMD(addr)   (*(RECOMP_MEM_QUAL recomp_f64_una *)ADDR(addr))
+ 
+ /* Set 32-bit values in memory (for rep stosd) */
+ static inline void MEMSET32(void* dst, uint32_t val, uint32_t count) {
+@@ -284,10 +332,14 @@ static inline uint16_t _pop16(uint32_t *sp) {
+ #define CMP_BE(a, b)   ((uint32_t)(a) <= (uint32_t)(b))     /* unsigned <= */
+ #define CMP_A(a, b)    ((uint32_t)(a) > (uint32_t)(b))      /* unsigned > */
+ #define CMP_AE(a, b)   ((uint32_t)(a) >= (uint32_t)(b))     /* unsigned >= */
+-#define CMP_L(a, b)    ((int32_t)(a) < (int32_t)(b))        /* signed < */
+-#define CMP_LE(a, b)   ((int32_t)(a) <= (int32_t)(b))       /* signed <= */
+-#define CMP_G(a, b)    ((int32_t)(a) > (int32_t)(b))        /* signed > */
+-#define CMP_GE(a, b)   ((int32_t)(a) >= (int32_t)(b))       /* signed >= */
++/* Bias unsigned operands to signed order. MSVC 19.51 /O1 miscompiles signed
++ * tests of left-aligned uint16_t values, dropping their sign bit (0xffff <<
++ * 16 becomes positive). Keep sign handling explicit, including narrow flags. */
++#define RECOMP_SIGNED_ORDER(v) ((uint32_t)(v) ^ 0x80000000u)
++#define CMP_L(a, b)    (RECOMP_SIGNED_ORDER(a) < RECOMP_SIGNED_ORDER(b))
++#define CMP_LE(a, b)   (RECOMP_SIGNED_ORDER(a) <= RECOMP_SIGNED_ORDER(b))
++#define CMP_G(a, b)    (RECOMP_SIGNED_ORDER(a) > RECOMP_SIGNED_ORDER(b))
++#define CMP_GE(a, b)   (RECOMP_SIGNED_ORDER(a) >= RECOMP_SIGNED_ORDER(b))
+ #define CMP_S(a, b)    ((int32_t)((uint32_t)(a) - (uint32_t)(b)) < 0)  /* sign flag */
+ #define CMP_NS(a, b)   ((int32_t)((uint32_t)(a) - (uint32_t)(b)) >= 0)
+ #define CMP_O(a, b)    0  /* TODO: overflow detection */
+@@ -298,10 +350,10 @@ static inline uint16_t _pop16(uint32_t *sp) {
+ /* Test-based conditions (from test a, b) */
+ #define TEST_Z(a, b)   (((uint32_t)(a) & (uint32_t)(b)) == 0)
+ #define TEST_NZ(a, b)  (((uint32_t)(a) & (uint32_t)(b)) != 0)
+-#define TEST_S(a, b)   ((int32_t)((uint32_t)(a) & (uint32_t)(b)) < 0)
+-#define TEST_NS(a, b)  ((int32_t)((uint32_t)(a) & (uint32_t)(b)) >= 0)
+-#define TEST_G(a, b)   ((int32_t)((uint32_t)(a) & (uint32_t)(b)) > 0)
+-#define TEST_LE(a, b)  ((int32_t)((uint32_t)(a) & (uint32_t)(b)) <= 0)
++#define TEST_S(a, b)   (((uint32_t)(a) & (uint32_t)(b) & 0x80000000u) != 0)
++#define TEST_NS(a, b)  (!TEST_S(a, b))
++#define TEST_G(a, b)   (TEST_NZ(a, b) && TEST_NS(a, b))
++#define TEST_LE(a, b)  (TEST_Z(a, b) || TEST_S(a, b))
+ 
+ /* Bit test (from bt) */
+ #define BT_CF(base, bit) (((uint32_t)(base) >> ((uint32_t)(bit) & 31)) & 1)
+@@ -816,6 +868,36 @@ static inline uint64_t mmx_pcmpgtw(uint64_t a, uint64_t b) {
+ #else
+ #define RECOMP_SHARED_DATA __attribute__((weak))
+ #endif
++#ifdef RECOMP_X87_WINDOW
++/* Unbalanced code can walk the window to an end of the buffer; move the eight
++ * live registers back to the middle (rare: balanced code stays put). Slots
++ * past ST(7) keep stale values instead of the shift's zeros; x87 code cannot
++ * observe them without a stack fault. */
++static inline void fp_window_recentre(void) {
++    int to = RECOMP_X87_SLOTS / 2 - 4;
++    memmove(&g_st_win[to], &g_st_win[g_fp_sp], 8 * sizeof(double));
++    memmove(&g_st_i64_win[to], &g_st_i64_win[g_fp_sp], 8 * sizeof(int64_t));
++    g_fp_sp = to;
++}
++
++static inline void fp_push_impl(double* st, int* top, double val) {
++    (void)st;
++    if (g_fp_sp <= 8) fp_window_recentre();
++    --g_fp_sp;
++    g_st_win[g_fp_sp] = val;
++    g_st_i64_win[g_fp_sp] = 0;
++    (*top)++;
++}
++
++static inline double fp_pop_impl(double* st, int* top) {
++    (void)st;
++    double val = g_st_win[g_fp_sp];
++    ++g_fp_sp;
++    if (g_fp_sp > RECOMP_X87_SLOTS - 9) fp_window_recentre();
++    (*top)--;
++    return val;
++}
++#else
+ RECOMP_SHARED_DATA int64_t g_st_i64[8] = {0};
+ 
+ static inline void fp_push_impl(double* st, int* top, double val) {
+@@ -834,6 +916,7 @@ static inline double fp_pop_impl(double* st, int* top) {
+     (*top)--;
+     return val;
+ }
++#endif
+ 
+ #define fp_push(val) fp_push_impl(_st, &_fp_top, (val))
+ #define fp_pop()     fp_pop_impl(_st, &_fp_top)
+@@ -914,7 +997,38 @@ static inline void CPUID_impl(uint32_t eax_val, uint32_t ebx_val, uint32_t ecx_v
+     if (eax_val == 0x80000001u) g_edx &= g_cpuid_edx_ext;
+     (void)ebx_val; (void)edx_val;
+ #else
+-    (void)eax_val; (void)ebx_val; (void)ecx_val; (void)edx_val;
++    /* Portable CPUID (hosts GCC/Clang): respostas Pentium-4-classicas,
++     * mascaradas pelos knobs fracos. Sem isto, cpuid e um no-op e o jogo
++     * le registradores velhos — checks de SSE2 de engine falham em
++     * silencio e o jogo sai com exit(0). (DesertDroid patch 0020) */
++    (void)ebx_val; (void)edx_val;
++    uint32_t feat_edx = 0xBFEBFBFFu;   /* FPU..MMX..SSE2..HTT (P4 classico) */
++    uint32_t feat_ecx = 0;             /* SSE3+ fora: o lifter cobre ate SSE2 */
++    switch (eax_val) {
++    case 0:
++        g_eax = 0x0000000A;            /* max basic leaf */
++        g_ebx = 0x756E6547u;           /* 'Genu' */
++        g_ecx = 0x49656E69u;           /* 'ineI' */
++        g_edx = 0x6C65746Eu;           /* 'ntel'  -> GenuineIntel */
++        break;
++    case 1:
++        g_eax = 0x00000F29u;           /* family 15, model 2, stepping 9 */
++        g_ebx = 0x00000000u;
++        g_ecx = feat_ecx & g_cpuid_ecx1;
++        g_edx = feat_edx & g_cpuid_edx1;
++        break;
++    case 0x80000000u:
++        g_eax = 0x80000008u;
++        g_ebx = g_ecx = g_edx = 0;
++        break;
++    case 0x80000001u:
++        g_eax = 0; g_ebx = 0; g_ecx = 0;
++        g_edx = 0x00800000u & g_cpuid_edx_ext;  /* so a flag classica (bit 23) */
++        break;
++    default:
++        g_eax = g_ebx = g_ecx = g_edx = 0;
++        break;
++    }
+ #endif
+ }
+ 
+@@ -970,6 +1084,19 @@ recomp_func_t recomp_lookup_import(uint32_t va);    /* import bridges */
+  * function whose first `je` tests the helper's ZF (Bunghole in One's ball
+  * never moved). */
+ 
++/* An indirect transfer to an address nothing lifted. By default it is printed
++ * and the call returns eax = 0 -- which lets a program limp on with a null it
++ * never produced, and the fault lands far from the cause. A host that defines
++ * RECOMP_STRICT_ICALL provides recomp_unresolved() instead and is expected to
++ * report the machine state and stop. */
++#ifdef RECOMP_STRICT_ICALL
++void recomp_unresolved(const char *kind, uint32_t va, uint32_t from);
++#define RECOMP_MISS(kind, va) recomp_unresolved((kind), (va), g_cur_func)
++#else
++#define RECOMP_MISS(kind, va) \
++    fprintf(stderr, "%s: unresolved VA 0x%08X from 0x%08X\n", (kind), (va), g_cur_func)
++#endif
++
+ /* Direct call to a known recompiled function */
+ #define RECOMP_CALL(func) do { \
+     uint32_t _caller = g_cur_func; \
+@@ -1004,7 +1131,7 @@ recomp_func_t recomp_lookup_import(uint32_t va);    /* import bridges */
+          * `esp += 4` here shifted the caller's stack by one slot per miss. \
+          * (Nocturne's CRT init runner lost its saved registers that way and \
+          * skipped ~90 static constructors after its first unlifted entry.) */ \
+-        fprintf(stderr, "ICALL: unresolved VA 0x%08X from 0x%08X\n", _va, g_cur_func); \
++        RECOMP_MISS("ICALL", _va); \
+         eax = 0; \
+     } \
+ } while(0)
+@@ -1022,7 +1149,7 @@ recomp_func_t recomp_lookup_import(uint32_t va);    /* import bridges */
+     if (_fn) { RECOMP_FLAGS_OUT(); RECOMP_REGS_OUT(); _fn(); RECOMP_REGS_IN(); } \
+     else if (_va == RECOMP_RETADDR) { /* setjmp and friends return by jumping \
+         to the saved return address; that is a return, not a missing target. */ } \
+-    else { fprintf(stderr, "ITAIL: unresolved VA 0x%08X from 0x%08X\n", _va, g_cur_func); } \
++    else { RECOMP_MISS("ITAIL", _va); } \
+ } while(0)
+ 
+ /* ============================================================
+@@ -1037,12 +1164,27 @@ recomp_func_t recomp_lookup_import(uint32_t va);    /* import bridges */
+  * useful for pinning a crash to a function without perturbing codegen. */
+ extern uint32_t g_cur_func;
+ 
++/* RECOMP_NATIVE_RANGE (bisection aid, see docs/HYBRID.md): a lifted function
++ * whose VA lies in [g_native_lo, g_native_hi) runs the ORIGINAL machine code
++ * instead, through recomp_run_native (host-provided). Everything it calls
++ * outside the range comes back to lifted code through the host's callback
++ * path. Halving the range until the symptom flips names the broken function. */
++#ifdef RECOMP_NATIVE_RANGE
++extern uint32_t g_native_lo, g_native_hi;
++void recomp_run_native(uint32_t va);
++#define RECOMP_NATIVE_CHECK(va)     if ((uint32_t)(va) - g_native_lo < g_native_hi - g_native_lo) { recomp_run_native(va); return; }
++#else
++#define RECOMP_NATIVE_CHECK(va)
++#endif
++
+ #ifdef RECOMP_TRACE
+ #define RECOMP_ENTER_SIZE 1024
+ extern uint32_t g_enter_trace[RECOMP_ENTER_SIZE];
+ extern uint32_t g_enter_idx;
+ void recomp_trace_enter(uint32_t va);
+-#define RECOMP_ENTER(va) do { g_cur_func = (va); RECOMP_FLAGS_IN(); recomp_trace_enter(va); } while (0)
++#define RECOMP_ENTER(va) do { g_cur_func = (va); RECOMP_NATIVE_CHECK(va) RECOMP_FLAGS_IN(); recomp_trace_enter(va); } while (0)
++#elif defined(RECOMP_NATIVE_RANGE)
++#define RECOMP_ENTER(va) do { g_cur_func = (va); RECOMP_NATIVE_CHECK(va) RECOMP_FLAGS_IN(); } while (0)
+ #else
+ #define RECOMP_ENTER(va) (g_cur_func = (va), RECOMP_FLAGS_IN())
+ #endif
+@@ -1066,6 +1208,13 @@ RECOMP_WEAK uint32_t g_backedges;
+         RECOMP_REGS_OUT(); recomp_yield_hook(); RECOMP_REGS_IN(); \
+     } } while (0)
+ 
++/* Host hook before the instruction at `va` (Lifter hook_sites). The host
++ * sees and may change the guest registers, memory and x87 stack; the lazy
++ * flags stay in the lifted function, so a hook must not change state that a
++ * pending flag consumer depends on. */
++void recomp_hook(uint32_t va);
++#define RECOMP_HOOK(va) do { RECOMP_REGS_OUT(); recomp_hook(va); RECOMP_REGS_IN(); } while (0)
++
+ /* Always-callable trace dump (no-op unless RECOMP_TRACE). */
+ void recomp_dump_trace(const char* why);
+ 
+@@ -1075,4 +1224,15 @@ void recomp_dump_trace(const char* why);
+     if (!_warned) { fprintf(stderr, "STUB: %s called\n", name); _warned = 1; } \
+ } while(0)
+ 
++/* SSE/MMX register file and helpers for tools/lift/simd32.py. */
++#include "recomp_simd.h"
++
++/* An instruction the lifter could not express. It used to be a null statement
++ * (a bare `;` plus an UNIMPLEMENTED comment), so a body with one simply skipped it and carried on
++ * with wrong state -- the worst kind of failure a recompile has. The runtime
++ * says which guest address and which instruction, then stops. A host may
++ * define recomp_unimpl itself; this weak default prints and aborts. */
++void recomp_unimpl(uint32_t va, const char *what);
++#define RECOMP_UNIMPL(va, what) recomp_unimpl((va), (what))
++
+ #endif /* RECOMP_TYPES_H */
+diff --git a/runtime/win32hle/gdi32.c b/runtime/win32hle/gdi32.c
+index 6dc0f98..40d4f12 100644
+--- a/runtime/win32hle/gdi32.c
++++ b/runtime/win32hle/gdi32.c
+@@ -9,6 +9,7 @@
+  * nearest-neighbour. 8/16/24bpp and palettes come with the palette layer.
+  */
+ #define _GNU_SOURCE
++#include "guest_mem.h"
+ #include <stdint.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -48,7 +49,7 @@ static void g_CreateDIBSection(void) {
+     int w = bi_w(bmi), h = bi_h(bmi), bpp = bi_bpp(bmi);
+     if (bpp != 32) hle_fatal("CreateDIBSection: only 32bpp supported for now, got %d", bpp);
+     int hab = h < 0 ? -h : h;
+-    uint32_t *bits = (uint32_t *)calloc((size_t)w * hab, 4);
++    uint32_t *bits = (uint32_t *)guest_ptr(guest_alloc((size_t)w * hab * 4));
+     if (g_dib_n < MAX_DIBS) {
+         g_dibs[g_dib_n].h = g_next_handle;
+         g_dibs[g_dib_n].bits = bits; g_dibs[g_dib_n].w = w;
+diff --git a/runtime/win32hle/guest_mem.c b/runtime/win32hle/guest_mem.c
+new file mode 100644
+index 0000000..8719adc
+--- /dev/null
++++ b/runtime/win32hle/guest_mem.c
+@@ -0,0 +1,97 @@
++/* guest_mem.c — arena de guest em VA baixo para hosts 64-bit (DesertDroid).
++ *
++ * Uma reserva MAP_NORESERVE em VA fixo abaixo de 4 GB; alocacoes sao bump
++ * alinhado a 16 (paginas anonimas ja vem zeradas). E o equivalente do
++ * GuestMemory do nfsu2-android, no tamanho que o boot do jogo precisa.
++ */
++#define _GNU_SOURCE
++#include <stdio.h>
++#include <stdint.h>
++#include <stddef.h>
++#include <string.h>
++#include <sys/mman.h>
++#include "guest_mem.h"
++
++#define ARENA_BASE 0x50000000u   /* longe da imagem (0x400000..) e dos shims (0x7F000000..) */
++#define ARENA_SIZE 0x18000000ull /* 384 MB reservados; paginas so viram ao tocar */
++#define HDR 16u                  /* header escondido: [0]=tamanho [4]=magic [8]=free-magic */
++
++static volatile uint64_t g_bump;   /* offset do proximo bloco na arena */
++static int g_arena_ok;
++
++static int arena_init(void)
++{
++    void *p = mmap((void *)(uintptr_t)ARENA_BASE, ARENA_SIZE,
++                   PROT_READ | PROT_WRITE,
++                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED,
++                   -1, 0);
++    if (p != (void *)(uintptr_t)ARENA_BASE) {
++        fprintf(stderr, "[guest_mem] mmap da arena em %#x falhou (%p)\n",
++                ARENA_BASE, p);
++        return 0;
++    }
++    g_bump = 0;
++    g_arena_ok = 1;
++    fprintf(stderr, "[guest_mem] arena de guest em %#x..%#llx\n",
++            ARENA_BASE, (unsigned long long)(ARENA_BASE + ARENA_SIZE));
++    return 1;
++}
++
++uint32_t guest_alloc(size_t size)
++{
++    if (!g_arena_ok && !arena_init()) return 0;
++    if (size == 0) size = 1;
++    size = (size + 15u) & ~(size_t)15u;
++    uint64_t off = __sync_fetch_and_add(&g_bump, size + HDR);
++    if (off + size + HDR > ARENA_SIZE) return 0;
++    uint32_t base = ARENA_BASE + (uint32_t)off;
++    *(uint32_t *)(uintptr_t)(base + 0)  = (uint32_t)size;
++    *(uint32_t *)(uintptr_t)(base + 4)  = 0xA110C8EDu;
++    *(uint32_t *)(uintptr_t)(base + 8)  = 0u;
++    return base + HDR;
++}
++
++uint32_t guest_realloc(uint32_t old_va, size_t newsize)
++{
++    if (!old_va) return guest_alloc(newsize);
++    if (old_va < ARENA_BASE + HDR || old_va > ARENA_BASE + (uint32_t)ARENA_SIZE)
++        return 0;                                  /* nao veio da arena: recusa */
++    uint32_t *hdr = (uint32_t *)(uintptr_t)(old_va - HDR);
++    if (hdr[1] != 0xA110C8EDu) return 0;
++    uint32_t oldsize = hdr[0];
++    uint32_t nv = guest_alloc(newsize);
++    if (nv)
++        memcpy(guest_ptr(nv), guest_ptr(old_va),
++               oldsize < newsize ? oldsize : newsize);
++    return nv;
++}
++
++void guest_free(uint32_t va)
++{
++    if (va < ARENA_BASE + HDR) return;             /* free() de nao-arena: no-op */
++    uint32_t *hdr = (uint32_t *)(uintptr_t)(va - HDR);
++    if (hdr[1] == 0xA110C8EDu) hdr[2] = 0xF4EEDBAAu;
++}
++
++uint32_t guest_alloc_at(uint32_t va, size_t size)
++{
++    if (!va) return guest_alloc(size);
++    if (size == 0) size = 1;
++    size = (size + 0xFFFu) & ~(size_t)0xFFFu;
++    void *p = mmap((void *)(uintptr_t)va, size,
++                   PROT_READ | PROT_WRITE,
++                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED,
++                   -1, 0);
++    return (p == (void *)(uintptr_t)va) ? va : 0;
++}
++
++void *guest_ptr(uint32_t va)
++{
++    return (void *)(uintptr_t)va;
++}
++
++/* Bytes ja consumidos do bump (diagnostico de esgotamento). */
++uint64_t guest_mem_used(void)
++{
++    return g_arena_ok ? g_bump : 0;
++}
+diff --git a/runtime/win32hle/guest_mem.h b/runtime/win32hle/guest_mem.h
+new file mode 100644
+index 0000000..4dc7c59
+--- /dev/null
++++ b/runtime/win32hle/guest_mem.h
+@@ -0,0 +1,35 @@
++/* guest_mem.h — alocacoes visiveis ao guest em hosts 64-bit (DesertDroid).
++ *
++ * O modelo RECOMP_FLAT_MEMORY trata o VA de 32 bits do guest como endereco
++ * literal do host. Em um host 64-bit, malloc/calloc devolvem ponteiros acima
++ * de 4 GB que, truncados ao devolver ao guest, apontam para memoria nao
++ * mapeada. Toda memoria que o guest recebe como ponteiro deve sair daqui:
++ * uma arena reservada em VA baixo.
++ */
++#ifndef WIN32HLE_GUEST_MEM_H
++#define WIN32HLE_GUEST_MEM_H
++#include <stdint.h>
++#include <stddef.h>
++
++/* VA de guest de um bloco novo (alinhado a 16, zerado), ou 0 se esgotado. */
++uint32_t guest_alloc(size_t size);
++
++/* Realoca: copia min(old,new) para um bloco novo (o tamanho antigo vive no
++ * header escondido). Retorna o novo VA ou 0. */
++uint32_t guest_realloc(uint32_t old_va, size_t newsize);
++
++/* Liberta (a arena e bump: hoje marca o header e nao reusa; suficiente
++ * para o boot — blocos liberados nao voltam, mas nada corrompe). */
++void guest_free(uint32_t va);
++
++/* O mesmo, em um VA pedido pelo guest (VirtualAlloc com endereco): mapeia
++ * paginas reais no va. Retorna o va ou 0. */
++uint32_t guest_alloc_at(uint32_t va, size_t size);
++
++/* VA de guest -> ponteiro host (no modelo flat e o proprio endereco). */
++void *guest_ptr(uint32_t va);
++
++/* Bytes ja consumidos do bump (diagnostico de esgotamento). */
++uint64_t guest_mem_used(void);
++
++#endif
+diff --git a/runtime/win32hle/host_lite.c b/runtime/win32hle/host_lite.c
+index 81ee36c..b311f75 100644
+--- a/runtime/win32hle/host_lite.c
++++ b/runtime/win32hle/host_lite.c
+@@ -12,6 +12,7 @@
+  * adds image mapping and IAT binding on top; those are separate.
+  */
+ #define _GNU_SOURCE   /* PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP */
++#include "guest_mem.h"
+ #include <stdint.h>
+ #include <stddef.h>
+ #include <stdio.h>
+@@ -83,12 +84,19 @@ static void regs_load(const regs_t *r) {
+ #define GUEST_STACK (4u << 20)
+ 
+ static uint32_t make_tib(uint32_t lo, uint32_t hi) {
+-    uint32_t *t = (uint32_t *)calloc(1, 0x1000);
++    uint32_t tva = guest_alloc(0x1000);
++    uint32_t *t = (uint32_t *)guest_ptr(tva);
+     t[0]        = 0xFFFFFFFFu;                 /* ExceptionList: end of chain */
+     t[1]        = hi;                          /* StackBase                   */
+     t[2]        = lo;                          /* StackLimit                  */
+-    t[0x18/4]   = (uint32_t)(uintptr_t)t;      /* Self (fs:[0x18])            */
+-    return (uint32_t)(uintptr_t)t;
++    t[0x18/4]   = tva;                         /* Self (fs:[0x18])            */
++    /* TLS estatico (DesertDroid patch 0022): o host preenche fs:[0x2C] */
++    t[0x2C/4]   = 0;
++    {
++        extern void dd_on_tib_ready(uint32_t tib_va) __attribute__((weak));
++        if (dd_on_tib_ready) dd_on_tib_ready(tva);
++    }
++    return tva;
+ }
+ 
+ typedef struct { regs_t r; int depth, inited; } mstate;
+@@ -97,7 +105,7 @@ static __thread mstate g_ms;
+ void mach_enter(void) {
+     pthread_mutex_lock(&g_mach);
+     if (!g_ms.inited) {
+-        uint32_t lo = (uint32_t)(uintptr_t)calloc(1, GUEST_STACK);
++        uint32_t lo = guest_alloc(GUEST_STACK);
+         g_ms.r.esp    = lo + GUEST_STACK - 64;
+         g_ms.r.fs     = make_tib(lo, lo + GUEST_STACK);
+         g_ms.r.fpu_cw = 0x027F;
+@@ -110,6 +118,18 @@ void mach_leave(void) {
+     pthread_mutex_unlock(&g_mach);
+ }
+ 
++/* Profundidade do claim atual desta thread (0 = nao detem a maquina).
++ * O yield hook do host (recomp_yield_hook) precisa dela so para
++ * entregar a maquina no claim MAIS EXTERNO — dentro de um callback
++ * aninhado a maquina continua detida mais acima e o loop simplesmente
++ * segue (mesma regra do native32_yield). */
++int mach_depth(void) {
++    return g_ms.inited ? g_ms.depth : 0;
++}
++
++/* Profundidade do claim atual desta thread (0 = nao detem a maquina). */
++int mach_depth(void);
++
+ /* ------------------------------------------------------------- dispatch
+  * recomp_lookup searches the generated dispatch table (declared extern in
+  * recomp_types.h; defined by the lifted program, or the selftest). */
+@@ -120,9 +140,10 @@ recomp_func_t recomp_lookup(uint32_t va) {
+         if (m == va) return recomp_dispatch_table[mid].func;
+         if (m < va) lo = mid + 1; else hi = mid;
+     }
+-    return NULL;
++    /* fora da tabela: overrides manuais do host (DesertDroid patch 0021) */
++    return recomp_lookup_manual(va);
+ }
+-recomp_func_t recomp_lookup_manual(uint32_t va) { (void)va; return NULL; }
++RECOMP_WEAK recomp_func_t recomp_lookup_manual(uint32_t va) { (void)va; return NULL; }
+ 
+ /* --------------------------------------------------------- shim registry
+  * Each shim gets a synthetic VA in a reserved range that no real image uses. */
+@@ -144,12 +165,14 @@ int win32hle_register(const win32hle_shim *shims) {
+     return added;
+ }
+ uint32_t hle_resolve(const char *name) {
+-    for (int i = 0; i < g_shim_n; i++)
++    /* newest wins: hosts registram overrides DEPOIS dos modulos base */
++    for (int i = g_shim_n - 1; i >= 0; i--)
+         if (!strcmp(g_shim[i].name, name)) return g_shim[i].va;
+     return 0;
+ }
+ const char *hle_name(uint32_t va) {
+-    for (int i = 0; i < g_shim_n; i++) if (g_shim[i].va == va) return g_shim[i].name;
++    for (int i = g_shim_n - 1; i >= 0; i--)
++        if (g_shim[i].va == va) return g_shim[i].name;
+     return NULL;
+ }
+ 
+diff --git a/runtime/win32hle/kernel32.c b/runtime/win32hle/kernel32.c
+index 9494bbc..c86c9c5 100644
+--- a/runtime/win32hle/kernel32.c
++++ b/runtime/win32hle/kernel32.c
+@@ -11,17 +11,28 @@
+ #include <string.h>
+ #include <time.h>
+ #include <unistd.h>
++#include "guest_mem.h"
+ #include <pthread.h>
+ #include "win32hle.h"
+ 
+ #define HEAP_ZERO_MEMORY 0x00000008u
+ 
+ /* --- process / module --- */
+-static const char g_cmdline[] = "game.exe";
++/* linha de comando: copia arena-backed (buffers de host truncam em 64-bit) */
++static uint32_t g_cmdline_va;
++static void k_GetCommandLineA(void)
++{
++    if (!g_cmdline_va) {
++        g_cmdline_va = guest_alloc(sizeof "\"FalloutNV.exe\"");  /* 16 bytes */
++        char *p = (char *)guest_ptr(g_cmdline_va);
++        strcpy(p, "\"FalloutNV.exe\"");
++    }
++    RETP(g_cmdline_va, 0);
++}
+ 
+ static void k_GetProcessHeap(void)    { RET(0x00000001u, 0); }          /* a nonzero handle */
+ static void k_GetModuleHandleA(void)  { RET(0x00400000u, 1); }          /* the image base */
+-static void k_GetCommandLineA(void)   { RETP(g_cmdline, 0); }
++/* ---- (o corpo novo de k_GetCommandLineA esta acima, com g_cmdline_va) ---- */
+ static void k_GetCurrentProcess(void) { RET(0xFFFFFFFFu, 0); }          /* pseudo-handle */
+ static void k_GetCurrentThreadId(void){ RET((uint32_t)(uintptr_t)pthread_self(), 0); }
+ static void k_ExitProcess(void)       { exit((int)A32(0)); }
+@@ -33,21 +44,21 @@ static void k_GetVersion(void)        { RET(5u | (0u<<8) | (2195u<<16), 0); }
+ /* --- heap --- */
+ static void k_HeapAlloc(void) {                                         /* (hHeap, flags, size) */
+     uint32_t flags = A32(1), size = A32(2);
+-    void *p = (flags & HEAP_ZERO_MEMORY) ? calloc(1, size) : malloc(size);
++    void *p = guest_ptr(guest_alloc(size));
++    if (flags & HEAP_ZERO_MEMORY) memset(p, 0, size);
+     RETP(p, 3);
+ }
+-static void k_HeapFree(void)   { free(APTR(2)); RET(1, 3); }            /* (hHeap, flags, ptr) */
+-static void k_HeapReAlloc(void){ RETP(realloc(APTR(2), A32(3)), 4); }   /* (hHeap, flags, ptr, size) */
++static void k_HeapFree(void)   { guest_free(A32(2)); RET(1, 3); }       /* (hHeap, flags, ptr) */
++static void k_HeapReAlloc(void){ RETP(guest_realloc(A32(2), A32(3)), 4); } /* (hHeap, flags, ptr, size) */
+ static void k_HeapSize(void)   { RET(0xFFFFFFFFu, 3); }                 /* unknown; callers rarely trust it */
+-static void k_LocalAlloc(void) { uint32_t flags=A32(0), n=A32(1); RETP(flags&0x40?calloc(1,n):malloc(n), 2); }
+-static void k_LocalFree(void)  { free(APTR(0)); RET(0, 1); }
++static void k_LocalAlloc(void) { uint32_t flags=A32(0), n=A32(1); RETP(guest_alloc(n), 2); }
++static void k_LocalFree(void)  { guest_free(A32(0)); RET(0, 1); }
+ 
+-/* VirtualAlloc(addr, size, type, protect): MEM_RESERVE/COMMIT -> a plain
+- * allocation. If the guest asked for a fixed address we honour it (it is a
+- * host pointer on a 32-bit host); otherwise hand back fresh memory. */
++/* VirtualAlloc(addr, size, type, protect): MEM_RESERVE/COMMIT -> arena de
++ * guest (em VA baixo). Se o guest pediu endereco fixo, mapeia la. */
+ static void k_VirtualAlloc(void) {
+     uint32_t addr = A32(0), size = A32(1);
+-    RETP(addr ? (void *)(uintptr_t)addr : calloc(1, size), 4);
++    RETP(guest_alloc_at(addr, size), 4);
+ }
+ static void k_VirtualFree(void) { RET(1, 3); }
+ 
+diff --git a/runtime/win32hle/kernel32_crt.c b/runtime/win32hle/kernel32_crt.c
+index f9dcce6..eed19a0 100644
+--- a/runtime/win32hle/kernel32_crt.c
++++ b/runtime/win32hle/kernel32_crt.c
+@@ -9,6 +9,7 @@
+ #define _GNU_SOURCE
+ #include <stdint.h>
+ #include <stdio.h>
++#include "guest_mem.h"
+ #include <stdlib.h>
+ #include <string.h>
+ #include <unistd.h>
+@@ -36,10 +37,18 @@ static void k_GetCPInfo(void) {                    /* (cp, &CPINFO) */
+ static void k_GetStringTypeA(void) { RET(1, 5); }
+ static void k_GetStringTypeW(void) { RET(1, 4); }
+ 
+-/* --- environment block: an empty, double-NUL-terminated block --- */
+-static char g_envblock[2] = { 0, 0 };
+-static void k_GetEnvironmentStrings(void)   { RETP(g_envblock, 0); }
+-static void k_GetEnvironmentStringsW(void)  { RETP(g_envblock, 0); }
++/* --- environment block: vazio (duplo NUL), ARENA-BACKED (host 64-bit) --- */
++static uint32_t g_envblock_va;
++static void k_GetEnvironmentStrings(void)
++{
++    if (!g_envblock_va) {
++        g_envblock_va = guest_alloc(4);
++        uint32_t *b = (uint32_t *)guest_ptr(g_envblock_va);
++        *b = 0;                                    /* "\0\0\0\0" */
++    }
++    RETP(g_envblock_va, 0);
++}
++static void k_GetEnvironmentStringsW(void) { k_GetEnvironmentStrings(); }
+ static void k_FreeEnvironmentStringsA(void) { RET(1, 1); }
+ static void k_FreeEnvironmentStringsW(void) { RET(1, 1); }
+ static void k_GetEnvironmentVariableA(void) { RET(0, 3); }   /* not found */
+diff --git a/runtime/win32hle/kernel32_ext.c b/runtime/win32hle/kernel32_ext.c
+index 22827be..c307ad3 100644
+--- a/runtime/win32hle/kernel32_ext.c
++++ b/runtime/win32hle/kernel32_ext.c
+@@ -9,6 +9,7 @@
+  * the CRT's locale queries) is filled in as a lift actually calls it.
+  */
+ #define _GNU_SOURCE
++#include "guest_mem.h"
+ #include <stdint.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -86,7 +87,7 @@ static void k_CloseHandle(void) { file_close(A32(0)); RET(1, 1); }
+ 
+ /* ---- Global* (we use GMEM_FIXED semantics: HGLOBAL == the pointer) ---- */
+ #define GMEM_ZEROINIT 0x0040u
+-static void k_GlobalAlloc(void) { uint32_t fl = A32(0), n = A32(1); RETP(fl & GMEM_ZEROINIT ? calloc(1, n) : malloc(n), 2); }
++static void k_GlobalAlloc(void) { uint32_t fl = A32(0), n = A32(1); RETP(guest_alloc(n), 2); }
+ static void k_GlobalFree(void)  { free(APTR(0)); RET(0, 1); }
+ static void k_GlobalLock(void)  { RETP(APTR(0), 1); }          /* already a pointer */
+ static void k_GlobalUnlock(void){ RET(1, 1); }
+diff --git a/runtime/win32hle/pe_loader.c b/runtime/win32hle/pe_loader.c
+index 5895336..68bd7a7 100644
+--- a/runtime/win32hle/pe_loader.c
++++ b/runtime/win32hle/pe_loader.c
+@@ -109,9 +109,13 @@ int recomp_pe_bind(const pe_image *img, uint32_t (*resolve)(const char *name)) {
+         for (; *ilt; ilt++, iat++) {
+             uint32_t va = 0;
+             if (*ilt & PE_ORDINAL_FLAG) {
+-                /* by ordinal: win32hle keys shims by name, so leave it for the
+-                 * resolver to answer by "DLL#N" if it chooses. */
+-                va = 0;
++                /* by ordinal: resolve via "DLL#N" so a host can register
++                 * ordinal shims under a predictable key (DesertDroid). */
++                char key[96];
++                snprintf(key, sizeof key, "%s#%u", dll, *ilt & ~PE_ORDINAL_FLAG);
++                va = resolve(key);
++                if (!va) fprintf(stderr, "[pe] unresolved import %s!#%u\n",
++                                 dll, *ilt & ~PE_ORDINAL_FLAG);
+             } else {
+                 const char *name = (const char *)(uintptr_t)(base + *ilt + 2); /* skip hint word */
+                 va = resolve(name);
