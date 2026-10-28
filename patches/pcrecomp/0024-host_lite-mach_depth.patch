@@ -1,17 +1,8 @@
-From 7ec187e402ba6e4bb382b89c550b5f28ef2b60ac Mon Sep 17 00:00:00 2001
-From: tiny <tiny@localhost>
-Date: Tue, 27 Oct 2026 23:17:49 -0400
-Subject: [PATCH] =?UTF-8?q?host=5Flite:=20expor=20mach=5Fdepth()=20?=
- =?UTF-8?q?=E2=80=94=20o=20yield=20hook=20do=20host=20so=20entrega=20a=20m?=
- =?UTF-8?q?aquina=20no=20claim=20mais=20externo=20(mesma=20regra=20do=20na?=
- =?UTF-8?q?tive32=5Fyield)?=
-MIME-Version: 1.0
-Content-Type: text/plain; charset=UTF-8
-Content-Transfer-Encoding: 8bit
+commit 7ec187e402ba6e4bb382b89c550b5f28ef2b60ac
+Author: tiny <tiny@localhost>
+Date:   Tue Oct 27 23:17:49 2026 -0400
 
----
- runtime/win32hle/host_lite.c | 12 ++++++++++++
- 1 file changed, 12 insertions(+)
+    host_lite: expor mach_depth() — o yield hook do host so entrega a maquina no claim mais externo (mesma regra do native32_yield)
 
 diff --git a/runtime/win32hle/host_lite.c b/runtime/win32hle/host_lite.c
 index 4f7b123..b311f75 100644
@@ -36,6 +27,3 @@ index 4f7b123..b311f75 100644
  /* ------------------------------------------------------------- dispatch
   * recomp_lookup searches the generated dispatch table (declared extern in
   * recomp_types.h; defined by the lifted program, or the selftest). */
--- 
-2.47.3
-
