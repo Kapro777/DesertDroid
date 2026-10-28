@@ -38,9 +38,9 @@ static uint16_t dd_ctype1(uint32_t ch)
     if (ch >= 'A' && ch <= 'Z') t |= C1_UPPER | C1_ALPHA;
     if (ch >= 'a' && ch <= 'z') t |= C1_LOWER | C1_ALPHA;
     if (ch >= '0' && ch <= '9') t |= C1_DIGIT;
-    if (ch == ' ' || ch == '\${ch}' || ch == '\${ch}' || ch == '\${ch}' ||
-        ch == '\${ch}' || ch == '\${ch}') t |= C1_SPACE;
-    if (ch == ' ' || ch == '\${ch}') t |= C1_BLANK;
+    if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' ||
+        ch == '\v' || ch == '\f') t |= C1_SPACE;
+    if (ch == ' ' || ch == '\t') t |= C1_BLANK;
     if (ch <= 0x1Fu || (ch >= 0x7Fu && ch <= 0x9Fu)) t |= C1_CNTRL;
     if (ch <= 0x7Fu && ispunct((unsigned char)ch)) t |= C1_PUNCT;
     if ((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'F') ||
