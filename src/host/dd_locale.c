@@ -15,6 +15,77 @@
 
 #define DD_LCID_EN_US 0x0409u
 
+#define C1_UPPER   0x0001u
+#define C1_LOWER   0x0002u
+#define C1_DIGIT   0x0004u
+#define C1_SPACE   0x0008u
+#define C1_PUNCT   0x0010u
+#define C1_CNTRL   0x0020u
+#define C1_BLANK   0x0040u
+#define C1_XDIGIT  0x0080u
+#define C1_ALPHA   0x0100u
+#define C1_DEFINED 0x0200u
+
+/* GetStringTypeA/W(dwInfoType, source, count, output).
+ * O CRT VS2008 usa CT_CTYPE1 durante o parse de locale/argv. O shim antigo
+ * apenas devolvia TRUE sem escrever output; isso deixa a stack local
+ * indefinida e não cumpre o contrato do Win32. Para a edição inglesa, a
+ * classificação ASCII é suficiente para a fase de arranque.
+ */
+static uint16_t dd_ctype1(uint32_t ch)
+{
+    uint16_t t = C1_DEFINED;
+    if (ch >= 'A' && ch <= 'Z') t |= C1_UPPER | C1_ALPHA;
+    if (ch >= 'a' && ch <= 'z') t |= C1_LOWER | C1_ALPHA;
+    if (ch >= '0' && ch <= '9') t |= C1_DIGIT;
+    if (ch == ' ' || ch == '\\t' || ch == '\\r' || ch == '\\n' ||
+        ch == '\\v' || ch == '\\f') t |= C1_SPACE;
+    if (ch == ' ' || ch == '\\t') t |= C1_BLANK;
+    if (ch <= 0x1Fu || (ch >= 0x7Fu && ch <= 0x9Fu)) t |= C1_CNTRL;
+    if (ch <= 0x7Fu && ispunct((unsigned char)ch)) t |= C1_PUNCT;
+    if ((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'F') ||
+        (ch >= 'a' && ch <= 'f')) t |= C1_XDIGIT;
+    return t;
+}
+
+static void k_GetStringTypeA(void)
+{
+    uint32_t kind = A32(0);
+    const unsigned char *src = (const unsigned char *)APTR(1);
+    int32_t count = (int32_t)A32(2);
+    uint16_t *dst = (uint16_t *)APTR(3);
+    if (kind != 1u || !src || !dst) RET(0, 4);
+    uint32_t n = 0;
+    if (count < 0) {
+        while (n < 0x100000u && src[n] != 0) n++;
+        if (n == 0x100000u) RET(0, 4);
+        n++; /* cchSrc < 0: include terminating NUL */
+    } else {
+        n = (uint32_t)count;
+    }
+    for (uint32_t i = 0; i < n; i++) dst[i] = dd_ctype1(src[i]);
+    RET(1, 4);
+}
+
+static void k_GetStringTypeW(void)
+{
+    uint32_t kind = A32(0);
+    const uint16_t *src = (const uint16_t *)APTR(1);
+    int32_t count = (int32_t)A32(2);
+    uint16_t *dst = (uint16_t *)APTR(3);
+    if (kind != 1u || !src || !dst) RET(0, 4);
+    uint32_t n = 0;
+    if (count < 0) {
+        while (n < 0x100000u && src[n] != 0) n++;
+        if (n == 0x100000u) RET(0, 4);
+        n++; /* cchSrc < 0: include terminating NUL */
+    } else {
+        n = (uint32_t)count;
+    }
+    for (uint32_t i = 0; i < n; i++) dst[i] = dd_ctype1(src[i]);
+    RET(1, 4);
+}
+
 /* ---- codepage ---- */
 static void k_IsValidCodePage(void) { RET(1, 1); }        /* tudo valido   */
 static void k_GetConsoleCP(void)     { RET(437, 0); }
@@ -171,6 +242,8 @@ static void k_EnumSystemLocalesA(void)
 static void k_SetEnvironmentVariableA(void) { RET(1, 2); }
 
 static const win32hle_shim dd_shims_locale[] = {
+    { "GetStringTypeA",      k_GetStringTypeA },
+    { "GetStringTypeW",      k_GetStringTypeW },
     { "IsValidCodePage",     k_IsValidCodePage },
     { "GetConsoleCP",        k_GetConsoleCP },
     { "GetConsoleOutputCP",  k_GetConsoleOutputCP },
