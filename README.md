@@ -30,8 +30,8 @@ FalloutNV.exe (do usuário)
 
 - [x] M0 — Catálogo: 119.800 funções, 2.078.307 blocos (runner, ~6 min)
 - [x] M1 — Lift: 0 falhas, 28,9M linhas de C em 400 arquivos
-- [ ] M2 — Compilar+linkar host (win32hle) — rodando na CI
-- [ ] M3 — Boot permissivo + bring-up de imports (ver docs/M3_IMPORT_CENSUS.md)
+- [x] M2 — Compilar+linkar host (win32hle) — build validado na CI privada
+- [ ] M3 — Boot permissivo + bring-up de imports (em diagnóstico na CI; ver docs/M3_IMPORT_CENSUS.md)
 - [ ] M4 — Primeiro frame / menu (D3D9→Vulkan via DXVK-Native, Bink, DirectSound/AAudio)
 - [ ] M5 — APK: Gradle + NDK, touch controls, loader de assets do usuário
 - [ ] M6 — Gameplay mínimo: novo jogo, Goodsprings, save/load
@@ -73,7 +73,10 @@ FalloutNV.exe (do usuário)
 
 ## Estado
 
-Em andamento — M0/M1 (catálogo + lift) rodando via GitHub Actions (repo privado `fnv-build-inputs` segura o exe BYOG).
+M0/M1 concluídos; M2 compila e linka na CI privada; M3 segue no bring-up
+de inicialização. O repositório privado `fnv-build-inputs` mantém a cópia
+de entrada usada pelo pipeline.
+
 Referências: external/pcrecomp (pinned 35548b8 + 14 patches nfsu2),
 external/nfsu2-recompiled (playbook Android), external/fnv-macos (difftest).
 
