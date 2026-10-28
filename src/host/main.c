@@ -32,6 +32,7 @@ void dd_dynload_register(void);
 void dd_crt_overrides_register(void);
 void dd_threads_register(void);
 void dd_tracers_register(void);
+void dd_stubs_boot_register(void);
 void dd_overrides_add(uint32_t va, recomp_func_t fn);
 void dd_fs_set_root(const char *host_dir);
 extern int win32hle_trace;   /* rastreamento de imports do proprio win32hle */
@@ -190,6 +191,7 @@ int main(int argc, char **argv)
     dd_crt_overrides_register(); /* _initterm sem o callback assassino     */
     dd_threads_register();      /* CreateThread/ExitThread (MM workers)   */
     dd_tracers_register();      /* descobrir quem chama os inits do MM   */
+    dd_stubs_boot_register();   /* stubs de boot: janela, Steam, D3D, COM */
 
     /* raiz de arquivos = pasta do exe do usuario (BYOG) */
     {
