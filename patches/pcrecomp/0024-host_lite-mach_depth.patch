@@ -1,17 +1,12 @@
-commit 7ec187e402ba6e4bb382b89c550b5f28ef2b60ac
-Author: tiny <tiny@localhost>
-Date:   Tue Oct 27 23:17:49 2026 -0400
-
-    host_lite: expor mach_depth() — o yield hook do host so entrega a maquina no claim mais externo (mesma regra do native32_yield)
-
 diff --git a/runtime/win32hle/host_lite.c b/runtime/win32hle/host_lite.c
-index 4f7b123..b311f75 100644
+index 81ee36c..8acd719 100644
 --- a/runtime/win32hle/host_lite.c
 +++ b/runtime/win32hle/host_lite.c
-@@ -118,6 +118,18 @@ void mach_leave(void) {
-     pthread_mutex_unlock(&g_mach);
+@@ -209,3 +209,15 @@ uint32_t hle_call_guest(uint32_t va, int nargs, const uint32_t *args) {
+     mach_leave();
+     return eax;
  }
- 
++
 +/* Profundidade do claim atual desta thread (0 = nao detem a maquina).
 + * O yield hook do host (recomp_yield_hook) precisa dela so para
 + * entregar a maquina no claim MAIS EXTERNO — dentro de um callback
@@ -23,7 +18,3 @@ index 4f7b123..b311f75 100644
 +
 +/* Profundidade do claim atual desta thread (0 = nao detem a maquina). */
 +int mach_depth(void);
-+
- /* ------------------------------------------------------------- dispatch
-  * recomp_lookup searches the generated dispatch table (declared extern in
-  * recomp_types.h; defined by the lifted program, or the selftest). */
