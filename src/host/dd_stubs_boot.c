@@ -28,15 +28,16 @@ static void k_CreateFileW(void) {
     RET(1, 7);
 }
 
-/* GetCommandLineW() -> LPWSTR */
+/* GetCommandLineW() -> LPWSTR. O ponteiro tem que pertencer à arena guest. */
 static void k_GetCommandLineW(void) {
     extern uint32_t guest_alloc(size_t);
     extern void *guest_ptr(uint32_t);
-    extern uint32_t g_eax;
-    uint32_t va = guest_alloc(64);
-    memset(guest_ptr(va), 0, 64);
-    g_eax = va;
-    RET(0, 0);
+    static const char cmdline[] = "C:\\FalloutNV\\FalloutNV.exe";
+    uint32_t va = guest_alloc(sizeof cmdline * sizeof(uint16_t));
+    uint16_t *wide = (uint16_t *)guest_ptr(va);
+    for (size_t i = 0; i < sizeof cmdline; i++)
+        wide[i] = (uint8_t)cmdline[i];
+    RETP(va, 0);
 }
 
 /* GetFileSizeEx(hFile, lpFileSize) -> BOOL */
@@ -53,15 +54,14 @@ static void k_VirtualQuery(void) {
     RET(0, 3);
 }
 
-/* GetCommandLineA() -> LPSTR */
+/* GetCommandLineA() -> LPSTR. Devolve argv[0] virtual, nunca NULL. */
 static void k_GetCommandLineA(void) {
     extern uint32_t guest_alloc(size_t);
     extern void *guest_ptr(uint32_t);
-    extern uint32_t g_eax;
-    uint32_t va = guest_alloc(64);
-    memset(guest_ptr(va), 0, 64);
-    g_eax = va;
-    RET(0, 0);
+    static const char cmdline[] = "C:\\FalloutNV\\FalloutNV.exe";
+    uint32_t va = guest_alloc(sizeof cmdline);
+    memcpy(guest_ptr(va), cmdline, sizeof cmdline);
+    RETP(va, 0);
 }
 
 /* GetFullPathNameA(...) -> DWORD */
