@@ -14,3 +14,5 @@
 00AA30C0 fast path MM (vtable+0x04) — bypass: roteia pro path geral 0xAA1130 (slab scan crasha em 0x10/livelock; free/realloc ja usam fallback CRT)
 00EC61C0 memset CRT — nativo do host (tail-jmp liftado suspeito do desalinhamento)
 00EC44D0 memmove CRT — nativo do host
+
+# cache bust 2026-10-29 11:54:03Z
