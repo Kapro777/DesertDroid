@@ -379,39 +379,18 @@ static void d_GetGammaRamp(void)       { dd_trace("GetGammaRamp");       RET(0, 
 /* SetTransform/SetRenderState/SetGammaRamp — aceita e ignora */
 static void d_SetGammaRamp(void)       { dd_trace("SetGammaRamp");       RET(0, 3); }
 
-/* ===== Stubs para métodos registrados mas sem implementação dedicada ===== */
+/* ===== Stubs APENAS para métodos SEM implementação manual ===== */
 #define STUB(name, argc, ret) static void name(void) { dd_trace(#name); RET((ret), (argc)); }
 
-/* Device methods que não têm implementação dedicada */
+/* Device methods que NÃO têm implementação manual dedicada */
 STUB(d_QueryInterface,  2, 0)
 STUB(d_AddRef,         0, 1)
 STUB(d_Release,         0, 1)
-STUB(d_TestCooperativeLevel, 0, 0)
-STUB(d_GetAvailableTextureMem, 0, 256u << 20)
-STUB(d_EvictManagedResources, 0, 0)
-STUB(d_GetDirect3D,    1, 0)
-STUB(d_GetDeviceCaps,  1, 0)
-STUB(d_GetDisplayMode, 2, 0)
-STUB(d_SetDisplayMode, 3, 0)
-STUB(d_GetCreationParameters, 1, 0)
-STUB(d_SetCursorProperties, 4, 0)
-STUB(d_SetCursorPosition, 3, 0)
 STUB(d_ShowCursor,     1, 1)
 STUB(d_CreateAdditionalSwapChain, 2, 0x88760866u)
 STUB(d_GetSwapChain,   3, 0x88760866u)
 STUB(d_GetNumberOfSwapChains, 0, 0)
-STUB(d_GetRasterStatus, 2, 0)
 STUB(d_SetDialogBoxMode, 1, 0x88760866u)
-STUB(d_SetGammaRamp,   3, 0)
-STUB(d_GetGammaRamp,   3, 0)
-STUB(d_Clear,          6, 0)
-STUB(d_GetTransform,   2, 0)
-STUB(d_GetRenderState, 2, 0)
-STUB(d_SetFVF,         1, 0)
-STUB(d_SetPixelShader, 1, 0)
-STUB(d_SetVertexShader, 1, 0)
-STUB(d_DrawIndexedPrimitive, 7, 0)
-STUB(d_DrawPrimitive,  5, 0)
 STUB(d_CreatePixelShader,  2, 0x88760866u)
 STUB(d_CreateVertexShader, 2, 0x88760866u)
 
