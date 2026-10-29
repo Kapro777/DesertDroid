@@ -379,6 +379,42 @@ static void d_GetGammaRamp(void)       { dd_trace("GetGammaRamp");       RET(0, 
 /* SetTransform/SetRenderState/SetGammaRamp — aceita e ignora */
 static void d_SetGammaRamp(void)       { dd_trace("SetGammaRamp");       RET(0, 3); }
 
+/* ===== Stubs para métodos registrados mas sem implementação dedicada ===== */
+#define STUB(name, argc, ret) static void name(void) { dd_trace(#name); RET((ret), (argc)); }
+
+/* Device methods que não têm implementação dedicada */
+STUB(d_QueryInterface,  2, 0)
+STUB(d_AddRef,         0, 1)
+STUB(d_Release,         0, 1)
+STUB(d_TestCooperativeLevel, 0, 0)
+STUB(d_GetAvailableTextureMem, 0, 256u << 20)
+STUB(d_EvictManagedResources, 0, 0)
+STUB(d_GetDirect3D,    1, 0)
+STUB(d_GetDeviceCaps,  1, 0)
+STUB(d_GetDisplayMode, 2, 0)
+STUB(d_SetDisplayMode, 3, 0)
+STUB(d_GetCreationParameters, 1, 0)
+STUB(d_SetCursorProperties, 4, 0)
+STUB(d_SetCursorPosition, 3, 0)
+STUB(d_ShowCursor,     1, 1)
+STUB(d_CreateAdditionalSwapChain, 2, 0x88760866u)
+STUB(d_GetSwapChain,   3, 0x88760866u)
+STUB(d_GetNumberOfSwapChains, 0, 0)
+STUB(d_GetRasterStatus, 2, 0)
+STUB(d_SetDialogBoxMode, 1, 0x88760866u)
+STUB(d_SetGammaRamp,   3, 0)
+STUB(d_GetGammaRamp,   3, 0)
+STUB(d_Clear,          6, 0)
+STUB(d_GetTransform,   2, 0)
+STUB(d_GetRenderState, 2, 0)
+STUB(d_SetFVF,         1, 0)
+STUB(d_SetPixelShader, 1, 0)
+STUB(d_SetVertexShader, 1, 0)
+STUB(d_DrawIndexedPrimitive, 7, 0)
+STUB(d_DrawPrimitive,  5, 0)
+STUB(d_CreatePixelShader,  2, 0x88760866u)
+STUB(d_CreateVertexShader, 2, 0x88760866u)
+
 static const char *const k_d3d9_methods[] = {
     "D3D9_IDirect3D9_QueryInterface", "D3D9_IDirect3D9_AddRef",
     "D3D9_IDirect3D9_Release", "D3D9_IDirect3D9_RegisterSoftwareDevice",
@@ -401,42 +437,7 @@ static void k_Direct3DCreate9(void)
     RET(obj, 1);   /* NULL (0) seria "sem Direct3D" */
 }
 
-/* ---- metodos do device: todos auto-anunciantes ---- */
-#define DEVM(name, argc, ret) \
-    static void name(void) { dd_trace(#name); RET((ret), (argc)); }
-
-/* Os que o FNV chama no arranjo grafico — valores benignos para andar o maximo */
-DEVM(d_QueryInterface,  2, 0)
-DEVM(d_AddRef,         0, 1)
-DEVM(d_Release,         0, 1)
-DEVM(d_TestCooperativeLevel, 0, 0)          /* D3D_OK */
-DEVM(d_GetAvailableTextureMem, 0, 256u << 20)
-DEVM(d_EvictManagedResources, 0, 0)
-DEVM(d_GetDirect3D,    1, 0)
-DEVM(d_GetDeviceCaps,  1, 0)
-DEVM(d_GetDisplayMode, 2, 0)
-DEVM(d_SetDisplayMode, 3, 0)
-DEVM(d_GetCreationParameters, 1, 0)
-DEVM(d_SetCursorProperties, 4, 0)
-DEVM(d_SetCursorPosition, 3, 0)
-DEVM(d_ShowCursor,     1, 1)
-DEVM(d_CreateAdditionalSwapChain, 2, 0x88760866u)
-DEVM(d_GetSwapChain,   3, 0x88760866u)
-DEVM(d_GetNumberOfSwapChains, 0, 0)
-DEVM(d_GetRasterStatus, 2, 0)
-DEVM(d_SetDialogBoxMode, 1, 0x88760866u)
-DEVM(d_SetGammaRamp,   3, 0)
-DEVM(d_GetGammaRamp,   3, 0)
-DEVM(d_Clear,          6, 0)
-DEVM(d_GetTransform,   2, 0)
-DEVM(d_GetRenderState, 2, 0)
-DEVM(d_SetFVF,         1, 0)
-DEVM(d_SetPixelShader, 1, 0)
-DEVM(d_SetVertexShader, 1, 0)
-DEVM(d_DrawIndexedPrimitive, 7, 0)
-DEVM(d_DrawPrimitive,  5, 0)
-DEVM(d_CreatePixelShader,  2, 0x88760866u)
-DEVM(d_CreateVertexShader, 2, 0x88760866u)
+/* Métodos do device com implementação real abaixo (não usar DEVM para estes) */
 
 static const win32hle_shim dd_shims_d3d9_reg[] = {
     { "Direct3DCreate9", k_Direct3DCreate9 },
