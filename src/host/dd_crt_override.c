@@ -23,6 +23,7 @@ extern void dd_overrides_add(uint32_t va, recomp_func_t fn);
 static void dd_ovr_00A5B270(void);
 static void dd_ovr_00A5B690(void);
 static void dd_ovr_00AA30C0(void);
+static void dd_ovr_00A642A0(void);  /* slab allocator fast-path (livelock fix) */
 uint32_t dd_tls_slot_value(uint32_t idx);
 
 /* _initterm real = sub_00ECCCF0 (catalogado); args do original:
@@ -140,8 +141,9 @@ void dd_crt_overrides_register(void)
     dd_overrides_add(0x00A5B270u, dd_ovr_00A5B270); /* format-chain: "" */
     dd_overrides_add(0x00A5B690u, dd_ovr_00A5B690); /* strlen: string vazia */
     dd_overrides_add(0x00AA30C0u, dd_ovr_00AA30C0); /* fast path MM -> geral */
+    dd_overrides_add(0x00A642A0u, dd_ovr_00A642A0); /* slab allocator fast-path (livelock) */
     fprintf(stderr, "[DesertDroid] overrides CRT registrados "
-            "(00ECCD14, 00A5B5A0, memset/memcpy nativos)\n");
+            "(00ECCD14, 00A5B5A0, memset/memcpy, 00AA30C0, 00A642A0)\n");
 }
 
 /* sub_00AA30C0 (vtable+0x04 do MM): fast path de alocacao via slabs do
@@ -195,6 +197,41 @@ static void dd_ovr_00AA30C0(void)
         }
     }
     g_esp += 4u + 0x1Cu;   /* ret 0x1C: pop ret + 7 args do thiscall do jogo */
+}
+
+/* sub_00A642A0: slab allocator fast-path (per-type pool).
+ * O loop em L_00A642C0 -> L_00A642D2 -> jne L_00A642C0 nao tem RECOMP_BACKEDGE,
+ * entao o yield hook nunca dispara e o host trava em livelock (run #40803153060).
+ * Override: roteia para o allocador geral 0x00AA1130 (cmd 0xD -> fallback CRT),
+ * lendo o size do objeto allocator (g_ecx = this). O objeto esta em
+ * MEM32(0x11F4784) (primeiro pool global). Assume-se size em allocator+0x10. */
+static void dd_ovr_00A642A0(void)
+{
+    extern uint32_t g_eax, g_ecx, g_esp;
+    extern uint32_t dd_mem32(uint32_t va);
+    extern uint32_t hle_call_guest(uint32_t va, int nargs, uint32_t *args);
+
+    uint32_t allocator_obj = g_ecx;           /* this pointer (from MEM32(0x11F4784)) */
+    uint32_t size = 0;
+
+    /* Tenta ler size do allocator object (offset 0x10 = campo comum de size class) */
+    if (allocator_obj >= 0x50000000u && allocator_obj < 0x68000000u) {
+        size = dd_mem32(allocator_obj + 0x10u);
+    }
+    /* Fallback: size padrao para slab pequeno (64 bytes, alinhamento 4) */
+    if (size == 0u || size > 0x1000u) size = 64u;
+
+    uint32_t args[2] = { size, 4u };
+    g_eax = hle_call_guest(0x00AA1130u, 2, args);  /* allocador geral -> fallback CRT */
+
+    static uint32_t n = 0;
+    if (n < 3)
+        fprintf(stderr, "[DesertDroid] 00A642A0 bypass: size=%u -> %#x\n", size, g_eax);
+    n++;
+
+    /* sub_00A642A0 e thiscall sem args na stack (RECOMP_CALL nao empilha args visiveis).
+     * Ajusta g_esp para o ret 8 do original (pop ret + 2 args do caller). */
+    g_esp += 8u;
 }
 
 /* sub_00A5B270: elo da cadeia format-string (00A5B270 -> 00A5B4B0 ->
