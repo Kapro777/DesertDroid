@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(DesertDroid C)
+project(DesertDroid C VERSION 0.3.0)
 
 # pcrecomp com os 14 patches (patches/pcrecomp/) aplicados no commit 35548b8
 set(PCRECOMP "${CMAKE_SOURCE_DIR}/../external/pcrecomp" CACHE PATH
@@ -57,3 +57,4 @@ target_include_directories(DesertDroid PRIVATE ${COMMON_INC})
 target_compile_options(DesertDroid PRIVATE -O2 -Wall -Wno-unused-but-set-variable)
 find_package(Threads REQUIRED)
 target_link_libraries(DesertDroid PRIVATE Threads::Threads m)
+
