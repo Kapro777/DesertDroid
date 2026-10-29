@@ -393,6 +393,10 @@ STUB(d_GetNumberOfSwapChains, 0, 0)
 STUB(d_SetDialogBoxMode, 1, 0x88760866u)
 STUB(d_CreatePixelShader,  2, 0x88760866u)
 STUB(d_CreateVertexShader, 2, 0x88760866u)
+STUB(d_SetDisplayMode, 3, 0)
+STUB(d_SetCursorProperties, 4, 0)
+STUB(d_SetCursorPosition, 3, 0)
+STUB(d_GetRasterStatus, 2, 0)
 
 static const char *const k_d3d9_methods[] = {
     "D3D9_IDirect3D9_QueryInterface", "D3D9_IDirect3D9_AddRef",
