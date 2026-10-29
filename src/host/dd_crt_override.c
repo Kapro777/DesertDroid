@@ -209,7 +209,7 @@ static void dd_ovr_00A642A0(void)
 {
     extern uint32_t g_eax, g_ecx, g_esp;
     extern uint32_t dd_mem32(uint32_t va);
-    extern uint32_t hle_call_guest(uint32_t va, int nargs, uint32_t *args);
+    extern uint32_t hle_call_guest(uint32_t va, int nargs, const uint32_t *args);
 
     uint32_t allocator_obj = g_ecx;           /* this pointer (from MEM32(0x11F4784)) */
     uint32_t size = 0;
