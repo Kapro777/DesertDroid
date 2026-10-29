@@ -59,8 +59,9 @@ target_compile_options(DesertDroid PRIVATE -O2 -Wall -Wno-unused-but-set-variabl
 find_package(Threads REQUIRED)
 
 # libvorbisfile / libvorbis / libogg (para OGG decode nativo — import do libvorbisfile.dll)
-find_package(Vorbis REQUIRED)
-find_package(OGG REQUIRED)
+# Usa pkg-config no runner CI (libvorbis-dev / libogg-dev instalados)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(VORBIS REQUIRED vorbisfile)
 
-target_link_libraries(DesertDroid PRIVATE Threads::Threads m ${VORBIS_LIBRARIES} ${OGG_LIBRARIES})
+target_link_libraries(DesertDroid PRIVATE Threads::Threads m ${VORBIS_LIBRARIES} ${VORBIS_CFLAGS_OTHER})
 
