@@ -151,10 +151,34 @@ static void k_GetClientRect(void) {
     RET(1, 2);
 }
 
-/* GetSystemMetrics(nIndex) -> int */
+/* GetSystemMetrics(nIndex) -> int.
+ * Return per-index values; a generic nonzero value makes Boolean metrics such
+ * as SM_REMOTESESSION incorrectly report true on headless/non-Windows hosts. */
 static void k_GetSystemMetrics(void) {
+    enum {
+        DD_SM_CXSCREEN = 0,
+        DD_SM_CYSCREEN = 1,
+        DD_SM_CMONITORS = 80,
+        DD_SM_REMOTESESSION = 0x1000,
+        DD_SM_REMOTECONTROL = 0x2001
+    };
+    extern uint32_t dd_mem32(uint32_t va);
     extern uint32_t g_eax;
-    g_eax = 800u;
+    uint32_t index = dd_mem32(g_esp + 4u);
+    uint32_t value;
+
+    switch (index) {
+    case DD_SM_CXSCREEN:       value = 1280u; break;
+    case DD_SM_CYSCREEN:       value = 720u; break;
+    case DD_SM_CMONITORS:      value = 1u; break;
+    case DD_SM_REMOTESESSION:
+    case DD_SM_REMOTECONTROL:  value = 0u; break;
+    default:                   value = 0u; break;
+    }
+
+    if (index == DD_SM_REMOTESESSION)
+        fprintf(stderr, "[GetSystemMetrics] SM_REMOTESESSION=0\\n");
+    g_eax = value;
     RET(1, 1);
 }
 
