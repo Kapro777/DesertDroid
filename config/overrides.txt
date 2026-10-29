@@ -16,3 +16,5 @@
 00EC44D0 memmove CRT — nativo do host
 
 # cache bust 2026-10-29 11:54:03Z
+
+# cache bust v2 2026-10-29 12:43:10Z
