@@ -176,7 +176,7 @@ static void k_GetSystemMetrics(void) {
     }
 
     if (index == DD_SM_REMOTESESSION)
-        fprintf(stderr, "[GetSystemMetrics] SM_REMOTESESSION=0\\n");
+        fprintf(stderr, "[GetSystemMetrics] SM_REMOTESESSION=0\n");
     RET(value, 1);
 }
 
