@@ -117,6 +117,268 @@ static void m3d9_CreateDevice(void)
     RET(0, 6);                              /* D3D_OK */
 }
 
+/* ===== Implementações reais dos métodos do device (M4) ===== */
+
+/* Present(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion) -> HRESULT */
+static void d_Present(void)
+{
+    dd_trace("Present");
+    /* No boot, apenas devolve D3D_OK; o swapchain real vem com DXVK-Native */
+    RET(0, 4);
+}
+
+/* Reset(pPresentationParameters) -> HRESULT */
+static void d_Reset(void)
+{
+    dd_trace("Reset");
+    /* Recebe D3DPRESENT_PARAMETERS* em APTR(1); no boot aceita sem fazer nada */
+    RET(0, 2);
+}
+
+/* CreateTexture(Width, Height, Levels, Usage, Format, Pool, ppTexture, pSharedHandle) -> HRESULT */
+static void d_CreateTexture(void)
+{
+    dd_trace("CreateTexture");
+    uint32_t width = A32(0), height = A32(1), levels = A32(2), usage = A32(3),
+             format = A32(4), pool = A32(5);
+    uint32_t *ppTex = (uint32_t *)APTR(6);
+    uint32_t *pShared = (uint32_t *)APTR(7);
+
+    /* Cria textura guest (stub): aloca objeto COM com vtable mínima */
+    if (!ppTex) RET(0x88760866u, 8);  /* D3DERR_INVALIDCALL */
+
+    static const char *const tex_methods[] = {
+        "D3D9_Texture_QueryInterface", "D3D9_Texture_AddRef", "D3D9_Texture_Release",
+        "D3D9_Texture_GetDevice", "D3D9_Texture_SetPrivateData", "D3D9_Texture_GetPrivateData",
+        "D3D9_Texture_FreePrivateData", "D3D9_Texture_SetPriority", "D3D9_Texture_GetPriority",
+        "D3D9_Texture_PreLoad", "D3D9_Texture_GetType", "D3D9_Texture_GetLevelCount",
+        "D3D9_Texture_GetLevelDesc", "D3D9_Texture_LockRect", "D3D9_Texture_UnlockRect",
+        "D3D9_Texture_GetSurfaceLevel", NULL
+    };
+
+    int n = 0; while (tex_methods[n]) n++;
+    uint32_t tex = com_object(tex_methods, n);
+    if (!tex) RET(0x88760866u, 8);
+    *ppTex = tex;
+    if (pShared) *pShared = 0;
+    fprintf(stderr, "[d3d9] CreateTexture %ux%u lvl=%u fmt=%#x -> %#x\n", width, height, levels, format, tex);
+    RET(0, 8);
+}
+
+/* CreateVertexBuffer(Length, Usage, FVF, Pool, ppVertexBuffer, pSharedHandle) -> HRESULT */
+static void d_CreateVertexBuffer(void)
+{
+    dd_trace("CreateVertexBuffer");
+    uint32_t length = A32(0), usage = A32(1), fvf = A32(2), pool = A32(3);
+    uint32_t *ppVB = (uint32_t *)APTR(4), *pShared = (uint32_t *)APTR(5);
+    if (!ppVB) RET(0x88760866u, 6);
+
+    static const char *const vb_methods[] = {
+        "D3D9_VB_QueryInterface", "D3D9_VB_AddRef", "D3D9_VB_Release",
+        "D3D9_VB_GetDevice", "D3D9_VB_SetPrivateData", "D3D9_VB_GetPrivateData",
+        "D3D9_VB_FreePrivateData", "D3D9_VB_SetPriority", "D3D9_VB_GetPriority",
+        "D3D9_VB_PreLoad", "D3D9_VB_GetType", "D3D9_VB_Lock", "D3D9_VB_Unlock",
+        "D3D9_VB_GetDesc", NULL
+    };
+
+    int n = 0; while (vb_methods[n]) n++;
+    uint32_t vb = com_object(vb_methods, n);
+    if (!vb) RET(0x88760866u, 6);
+    *ppVB = vb;
+    if (pShared) *pShared = 0;
+    fprintf(stderr, "[d3d9] CreateVertexBuffer len=%u usage=%#x fvf=%#x -> %#x\n", length, usage, fvf, vb);
+    RET(0, 6);
+}
+
+/* CreateIndexBuffer(Length, Usage, Format, Pool, ppIndexBuffer, pSharedHandle) -> HRESULT */
+static void d_CreateIndexBuffer(void)
+{
+    dd_trace("CreateIndexBuffer");
+    uint32_t length = A32(0), usage = A32(1), format = A32(2), pool = A32(3);
+    uint32_t *ppIB = (uint32_t *)APTR(4), *pShared = (uint32_t *)APTR(5);
+    if (!ppIB) RET(0x88760866u, 6);
+
+    static const char *const ib_methods[] = {
+        "D3D9_IB_QueryInterface", "D3D9_IB_AddRef", "D3D9_IB_Release",
+        "D3D9_IB_GetDevice", "D3D9_IB_SetPrivateData", "D3D9_IB_GetPrivateData",
+        "D3D9_IB_FreePrivateData", "D3D9_IB_SetPriority", "D3D9_IB_GetPriority",
+        "D3D9_IB_PreLoad", "D3D9_IB_GetType", "D3D9_IB_Lock", "D3D9_IB_Unlock",
+        "D3D9_IB_GetDesc", NULL
+    };
+
+    int n = 0; while (ib_methods[n]) n++;
+    uint32_t ib = com_object(ib_methods, n);
+    if (!ib) RET(0x88760866u, 6);
+    *ppIB = ib;
+    if (pShared) *pShared = 0;
+    fprintf(stderr, "[d3d9] CreateIndexBuffer len=%u fmt=%#x -> %#x\n", length, format, ib);
+    RET(0, 6);
+}
+
+/* SetTransform(State, pMatrix) -> HRESULT */
+static void d_SetTransform(void)
+{
+    dd_trace("SetTransform");
+    uint32_t state = A32(0);
+    /* pMatrix em APTR(1) — matriz 4x4 float (64 bytes); no boot apenas ignora */
+    RET(0, 2);
+}
+
+/* SetRenderState(State, Value) -> HRESULT */
+static void d_SetRenderState(void)
+{
+    dd_trace("SetRenderState");
+    uint32_t state = A32(0), value = A32(1);
+    /* Guarda em estado interno se necessário; no boot apenas D3D_OK */
+    RET(0, 2);
+}
+
+/* SetFVF(FVF) -> HRESULT */
+static void d_SetFVF(void)
+{
+    dd_trace("SetFVF");
+    RET(0, 1);
+}
+
+/* SetPixelShader(Shader) -> HRESULT */
+static void d_SetPixelShader(void)
+{
+    dd_trace("SetPixelShader");
+    RET(0, 1);
+}
+
+/* SetVertexShader(Shader) -> HRESULT */
+static void d_SetVertexShader(void)
+{
+    dd_trace("SetVertexShader");
+    RET(0, 1);
+}
+
+/* DrawIndexedPrimitive(Type, BaseIndex, MinIndex, NumVertices, StartIndex, PrimitiveCount) -> HRESULT */
+static void d_DrawIndexedPrimitive(void)
+{
+    dd_trace("DrawIndexedPrimitive");
+    RET(0, 7);
+}
+
+/* DrawPrimitive(PrimitiveType, StartVertex, PrimitiveCount) -> HRESULT */
+static void d_DrawPrimitive(void)
+{
+    dd_trace("DrawPrimitive");
+    RET(0, 4);
+}
+
+/* Clear(Count, pRects, Flags, Color, Z, Stencil) -> HRESULT */
+static void d_Clear(void)
+{
+    dd_trace("Clear");
+    RET(0, 7);
+}
+
+/* BeginScene/EndScene -> HRESULT */
+static void d_BeginScene(void)
+{
+    dd_trace("BeginScene");
+    RET(0, 0);
+}
+static void d_EndScene(void)
+{
+    dd_trace("EndScene");
+    RET(0, 0);
+}
+
+/* GetBackBuffer(SwapChain, Type, ppBackBuffer) -> HRESULT */
+static void d_GetBackBuffer(void)
+{
+    dd_trace("GetBackBuffer");
+    uint32_t *ppSurf = (uint32_t *)APTR(3);
+    if (!ppSurf) RET(0x88760866u, 4);
+    /* Surface stub */
+    static const char *const surf_methods[] = {
+        "D3D9_Surf_QueryInterface", "D3D9_Surf_AddRef", "D3D9_Surf_Release",
+        "D3D9_Surf_GetDevice", "D3D9_Surf_SetPrivateData", "D3D9_Surf_GetPrivateData",
+        "D3D9_Surf_FreePrivateData", "D3D9_Surf_SetPriority", "D3D9_Surf_GetPriority",
+        "D3D9_Surf_PreLoad", "D3D9_Surf_GetType", "D3D9_Surf_GetContainer",
+        "D3D9_Surf_GetDesc", "D3D9_Surf_LockRect", "D3D9_Surf_UnlockRect",
+        "D3D9_Surf_GetDC", "D3D9_Surf_ReleaseDC", NULL
+    };
+    int n = 0; while (surf_methods[n]) n++;
+    uint32_t surf = com_object(surf_methods, n);
+    if (!surf) RET(0x88760866u, 4);
+    *ppSurf = surf;
+    RET(0, 4);
+}
+
+/* GetDisplayMode(SwapChain, pMode) -> HRESULT */
+static void d_GetDisplayMode(void)
+{
+    dd_trace("GetDisplayMode");
+    uint32_t *mode = (uint32_t *)APTR(1);
+    if (mode) { mode[0] = 1280; mode[1] = 720; mode[2] = 60; mode[3] = 21; }
+    RET(0, 2);
+}
+
+/* TestCooperativeLevel -> HRESULT */
+static void d_TestCooperativeLevel(void)
+{
+    dd_trace("TestCooperativeLevel");
+    RET(0, 0);  /* D3D_OK = device operational */
+}
+
+/* GetAvailableTextureMem -> DWORD */
+static void d_GetAvailableTextureMem(void)
+{
+    dd_trace("GetAvailableTextureMem");
+    RET(256u << 20, 0);  /* 256 MB */
+}
+
+/* EvictManagedResources -> HRESULT */
+static void d_EvictManagedResources(void)
+{
+    dd_trace("EvictManagedResources");
+    RET(0, 0);
+}
+
+/* GetDirect3D(ppD3D9) -> HRESULT */
+static void d_GetDirect3D(void)
+{
+    dd_trace("GetDirect3D");
+    uint32_t *pp = (uint32_t *)APTR(0);
+    if (pp) *pp = g_ecx;  /* devolve o IDirect3D9 original (aprox) */
+    RET(0, 1);
+}
+
+/* GetDeviceCaps(pCaps) -> HRESULT */
+static void d_GetDeviceCaps(void)
+{
+    dd_trace("GetDeviceCaps");
+    memset((void *)APTR(0), 0, 2048);
+    RET(0, 1);
+}
+
+/* GetCreationParameters(pParams) -> HRESULT */
+static void d_GetCreationParameters(void)
+{
+    dd_trace("GetCreationParameters");
+    memset((void *)APTR(0), 0, 16);
+    RET(0, 1);
+}
+
+/* SetTexture(Stage, pTexture) -> HRESULT */
+static void d_SetTexture(void)
+{
+    dd_trace("SetTexture");
+    RET(0, 2);
+}
+
+/* GetTransform/GetRenderState/GetGammaRamp — devolve defaults */
+static void d_GetTransform(void)       { dd_trace("GetTransform");       memset((void *)APTR(1), 0, 64); RET(0, 2); }
+static void d_GetRenderState(void)     { dd_trace("GetRenderState");     *(uint32_t *)APTR(1) = 0; RET(0, 2); }
+static void d_GetGammaRamp(void)       { dd_trace("GetGammaRamp");       RET(0, 2); }
+
+/* SetTransform/SetRenderState/SetGammaRamp — aceita e ignora */
+static void d_SetGammaRamp(void)       { dd_trace("SetGammaRamp");       RET(0, 3); }
+
 static const char *const k_d3d9_methods[] = {
     "D3D9_IDirect3D9_QueryInterface", "D3D9_IDirect3D9_AddRef",
     "D3D9_IDirect3D9_Release", "D3D9_IDirect3D9_RegisterSoftwareDevice",
@@ -161,29 +423,18 @@ DEVM(d_ShowCursor,     1, 1)
 DEVM(d_CreateAdditionalSwapChain, 2, 0x88760866u)
 DEVM(d_GetSwapChain,   3, 0x88760866u)
 DEVM(d_GetNumberOfSwapChains, 0, 0)
-DEVM(d_Reset,          1, 0)
-DEVM(d_Present,        3, 0)
-DEVM(d_GetBackBuffer,  4, 0x88760866u)
 DEVM(d_GetRasterStatus, 2, 0)
 DEVM(d_SetDialogBoxMode, 1, 0x88760866u)
 DEVM(d_SetGammaRamp,   3, 0)
 DEVM(d_GetGammaRamp,   3, 0)
-DEVM(d_BeginScene,     0, 0)
-DEVM(d_EndScene,       0, 0)
 DEVM(d_Clear,          6, 0)
-DEVM(d_SetTransform,   2, 0)
 DEVM(d_GetTransform,   2, 0)
-DEVM(d_SetRenderState, 2, 0)
 DEVM(d_GetRenderState, 2, 0)
-DEVM(d_SetTexture,     2, 0)
 DEVM(d_SetFVF,         1, 0)
 DEVM(d_SetPixelShader, 1, 0)
 DEVM(d_SetVertexShader, 1, 0)
 DEVM(d_DrawIndexedPrimitive, 7, 0)
 DEVM(d_DrawPrimitive,  5, 0)
-DEVM(d_CreateTexture,  7, 0x88760866u)
-DEVM(d_CreateIndexBuffer, 6, 0x88760866u)
-DEVM(d_CreateVertexBuffer, 6, 0x88760866u)
 DEVM(d_CreatePixelShader,  2, 0x88760866u)
 DEVM(d_CreateVertexShader, 2, 0x88760866u)
 
@@ -275,6 +526,80 @@ static const char *const k_device_methods[] = {
     "D3D9_Device_CreateVertexShader",
     NULL
 };
+
+/* ===== Stubs COM para texturas / vertex buffer / index buffer / surface ===== */
+
+#define COM_STUB(name, argc, ret) \
+    static void name(void) { dd_trace(#name); RET((ret), (argc)); }
+
+/* Texture methods */
+COM_STUB(D3D9_Texture_QueryInterface, 2, 0)
+COM_STUB(D3D9_Texture_AddRef, 0, 1)
+COM_STUB(D3D9_Texture_Release, 0, 1)
+COM_STUB(D3D9_Texture_GetDevice, 1, 0)
+COM_STUB(D3D9_Texture_SetPrivateData, 4, 0)
+COM_STUB(D3D9_Texture_GetPrivateData, 4, 0)
+COM_STUB(D3D9_Texture_FreePrivateData, 2, 0)
+COM_STUB(D3D9_Texture_SetPriority, 1, 0)
+COM_STUB(D3D9_Texture_GetPriority, 1, 1)
+COM_STUB(D3D9_Texture_PreLoad, 0, 0)
+COM_STUB(D3D9_Texture_GetType, 1, 3)   /* D3DRTYPE_TEXTURE */
+COM_STUB(D3D9_Texture_GetLevelCount, 1, 1)
+COM_STUB(D3D9_Texture_GetLevelDesc, 2, 0)
+COM_STUB(D3D9_Texture_LockRect, 4, 0)
+COM_STUB(D3D9_Texture_UnlockRect, 2, 0)
+COM_STUB(D3D9_Texture_GetSurfaceLevel, 2, 0)
+
+/* Vertex Buffer methods */
+COM_STUB(D3D9_VB_QueryInterface, 2, 0)
+COM_STUB(D3D9_VB_AddRef, 0, 1)
+COM_STUB(D3D9_VB_Release, 0, 1)
+COM_STUB(D3D9_VB_GetDevice, 1, 0)
+COM_STUB(D3D9_VB_SetPrivateData, 4, 0)
+COM_STUB(D3D9_VB_GetPrivateData, 4, 0)
+COM_STUB(D3D9_VB_FreePrivateData, 2, 0)
+COM_STUB(D3D9_VB_SetPriority, 1, 0)
+COM_STUB(D3D9_VB_GetPriority, 1, 1)
+COM_STUB(D3D9_VB_PreLoad, 0, 0)
+COM_STUB(D3D9_VB_GetType, 1, 4)   /* D3DRTYPE_VERTEXBUFFER */
+COM_STUB(D3D9_VB_Lock, 4, 0)
+COM_STUB(D3D9_VB_Unlock, 1, 0)
+COM_STUB(D3D9_VB_GetDesc, 2, 0)
+
+/* Index Buffer methods */
+COM_STUB(D3D9_IB_QueryInterface, 2, 0)
+COM_STUB(D3D9_IB_AddRef, 0, 1)
+COM_STUB(D3D9_IB_Release, 0, 1)
+COM_STUB(D3D9_IB_GetDevice, 1, 0)
+COM_STUB(D3D9_IB_SetPrivateData, 4, 0)
+COM_STUB(D3D9_IB_GetPrivateData, 4, 0)
+COM_STUB(D3D9_IB_FreePrivateData, 2, 0)
+COM_STUB(D3D9_IB_SetPriority, 1, 0)
+COM_STUB(D3D9_IB_GetPriority, 1, 1)
+COM_STUB(D3D9_IB_PreLoad, 0, 0)
+COM_STUB(D3D9_IB_GetType, 1, 5)   /* D3DRTYPE_INDEXBUFFER */
+COM_STUB(D3D9_IB_Lock, 4, 0)
+COM_STUB(D3D9_IB_Unlock, 1, 0)
+COM_STUB(D3D9_IB_GetDesc, 2, 0)
+
+/* Surface methods */
+COM_STUB(D3D9_Surf_QueryInterface, 2, 0)
+COM_STUB(D3D9_Surf_AddRef, 0, 1)
+COM_STUB(D3D9_Surf_Release, 0, 1)
+COM_STUB(D3D9_Surf_GetDevice, 1, 0)
+COM_STUB(D3D9_Surf_SetPrivateData, 4, 0)
+COM_STUB(D3D9_Surf_GetPrivateData, 4, 0)
+COM_STUB(D3D9_Surf_FreePrivateData, 2, 0)
+COM_STUB(D3D9_Surf_SetPriority, 1, 0)
+COM_STUB(D3D9_Surf_GetPriority, 1, 1)
+COM_STUB(D3D9_Surf_PreLoad, 0, 0)
+COM_STUB(D3D9_Surf_GetType, 1, 1)   /* D3DRTYPE_SURFACE */
+COM_STUB(D3D9_Surf_GetContainer, 2, 0)
+COM_STUB(D3D9_Surf_GetDesc, 2, 0)
+COM_STUB(D3D9_Surf_LockRect, 4, 0)
+COM_STUB(D3D9_Surf_UnlockRect, 2, 0)
+COM_STUB(D3D9_Surf_GetDC, 2, 0)
+COM_STUB(D3D9_Surf_ReleaseDC, 1, 0)
 
 void dd_d3d9_register(void)
 {

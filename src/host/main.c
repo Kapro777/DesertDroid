@@ -28,6 +28,7 @@ void dd_sync_register(void);
 void dd_locale_register(void);
 void dd_fs_register(void);
 void dd_d3d9_register(void);
+void dd_audio_register(void);
 void dd_dynload_register(void);
 void dd_crt_overrides_register(void);
 void dd_threads_register(void);
@@ -188,6 +189,7 @@ int main(int argc, char **argv)
     dd_fs_register();      /* filesystem: FindFirstFile, pastas, ExitProcess diag */
     dd_dynload_register(); /* GetProcAddress de verdade                    */
     dd_d3d9_register();     /* Direct3DCreate9 + COM HLE auto-anunciante    */
+    dd_audio_register();    /* DirectSound -> AAudio stubs                  */
     dd_crt_overrides_register(); /* _initterm sem o callback assassino     */
     dd_threads_register();      /* CreateThread/ExitThread (MM workers)   */
     dd_tracers_register();      /* descobrir quem chama os inits do MM   */

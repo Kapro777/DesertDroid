@@ -37,6 +37,7 @@ add_executable(DesertDroid
   src/host/dd_locale.c
   src/host/dd_fs.c
   src/host/dd_d3d9.c
+  src/host/dd_audio.c
   src/host/dd_crt_override.c
   src/host/dd_tls.c
   src/host/dd_threads.c
@@ -56,5 +57,10 @@ target_compile_definitions(DesertDroid PRIVATE ${COMMON_DEFS})
 target_include_directories(DesertDroid PRIVATE ${COMMON_INC})
 target_compile_options(DesertDroid PRIVATE -O2 -Wall -Wno-unused-but-set-variable)
 find_package(Threads REQUIRED)
-target_link_libraries(DesertDroid PRIVATE Threads::Threads m)
+
+# libvorbisfile / libvorbis / libogg (para OGG decode nativo — import do libvorbisfile.dll)
+find_package(Vorbis REQUIRED)
+find_package(OGG REQUIRED)
+
+target_link_libraries(DesertDroid PRIVATE Threads::Threads m ${VORBIS_LIBRARIES} ${OGG_LIBRARIES})
 
