@@ -163,7 +163,6 @@ static void k_GetSystemMetrics(void) {
         DD_SM_REMOTECONTROL = 0x2001
     };
     extern uint32_t dd_mem32(uint32_t va);
-    extern uint32_t g_eax;
     uint32_t index = dd_mem32(g_esp + 4u);
     uint32_t value;
 
@@ -178,8 +177,7 @@ static void k_GetSystemMetrics(void) {
 
     if (index == DD_SM_REMOTESESSION)
         fprintf(stderr, "[GetSystemMetrics] SM_REMOTESESSION=0\\n");
-    g_eax = value;
-    RET(1, 1);
+    RET(value, 1);
 }
 
 /* LoadIconA(...) -> HICON */
