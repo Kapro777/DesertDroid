@@ -58,10 +58,16 @@ target_include_directories(DesertDroid PRIVATE ${COMMON_INC})
 target_compile_options(DesertDroid PRIVATE -O2 -Wall -Wno-unused-but-set-variable)
 find_package(Threads REQUIRED)
 
-# libvorbisfile / libvorbis / libogg (para OGG decode nativo — import do libvorbisfile.dll)
-# Usa pkg-config no runner CI (libvorbis-dev / libogg-dev instalados)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(VORBIS REQUIRED vorbisfile)
+# libvorbisfile / libvorbis / libogg (para OGG decode nativo — import do libvorbisfile.dll).
+# Opcional: se pkg-config achar, linka; se não, compila sem OGG (stubs no-op).
+find_package(PkgConfig QUIET)
+if(PKG_CONFIG_FOUND)
+    pkg_check_modules(VORBIS vorbisfile)
+    if(VORBIS_FOUND)
+        target_link_libraries(DesertDroid PRIVATE ${VORBIS_LIBRARIES})
+        target_compile_definitions(DesertDroid PRIVATE HAVE_VORBISFILE)
+    endif()
+endif()
 
-target_link_libraries(DesertDroid PRIVATE Threads::Threads m ${VORBIS_LIBRARIES} ${VORBIS_CFLAGS_OTHER})
+target_link_libraries(DesertDroid PRIVATE Threads::Threads m)
 
