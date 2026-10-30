@@ -654,7 +654,7 @@ index 81ee36c..b311f75 100644
  }
  
 diff --git a/runtime/win32hle/kernel32.c b/runtime/win32hle/kernel32.c
-index 9494bbc..c86c9c5 100644
+index 9494bbc..3e30657 100644
 --- a/runtime/win32hle/kernel32.c
 +++ b/runtime/win32hle/kernel32.c
 @@ -11,17 +11,28 @@
@@ -688,7 +688,7 @@ index 9494bbc..c86c9c5 100644
  static void k_GetCurrentProcess(void) { RET(0xFFFFFFFFu, 0); }          /* pseudo-handle */
  static void k_GetCurrentThreadId(void){ RET((uint32_t)(uintptr_t)pthread_self(), 0); }
  static void k_ExitProcess(void)       { exit((int)A32(0)); }
-@@ -33,21 +44,21 @@ static void k_GetVersion(void)        { RET(5u | (0u<<8) | (2195u<<16), 0); }
+@@ -33,21 +44,31 @@ static void k_GetVersion(void)        { RET(5u | (0u<<8) | (2195u<<16), 0); }
  /* --- heap --- */
  static void k_HeapAlloc(void) {                                         /* (hHeap, flags, size) */
      uint32_t flags = A32(1), size = A32(2);
@@ -704,7 +704,17 @@ index 9494bbc..c86c9c5 100644
  static void k_HeapSize(void)   { RET(0xFFFFFFFFu, 3); }                 /* unknown; callers rarely trust it */
 -static void k_LocalAlloc(void) { uint32_t flags=A32(0), n=A32(1); RETP(flags&0x40?calloc(1,n):malloc(n), 2); }
 -static void k_LocalFree(void)  { free(APTR(0)); RET(0, 1); }
-+static void k_LocalAlloc(void) { uint32_t flags=A32(0), n=A32(1); RETP(guest_alloc(n), 2); }
++/* LMEM_FIXED: zero-init flag idem GlobalAlloc (DesertDroid). */
++#define LMEM_ZEROINIT 0x0040u
++static void k_LocalAlloc(void) {
++    uint32_t flags = A32(0), n = A32(1);
++    if (flags & LMEM_ZEROINIT) {
++        uint32_t va = guest_alloc(n);
++        memset(guest_ptr(va), 0, n);
++        RETP(va, 2);
++    }
++    RETP(guest_alloc(n), 2);
++}
 +static void k_LocalFree(void)  { guest_free(A32(0)); RET(0, 1); }
  
 -/* VirtualAlloc(addr, size, type, protect): MEM_RESERVE/COMMIT -> a plain
@@ -796,7 +806,7 @@ index f9dcce6..7b770f1 100644
  static void k_RaiseException(void) { hle_fatal("RaiseException (guest SEH/C++ throw) not handled yet"); }
  
 diff --git a/runtime/win32hle/kernel32_ext.c b/runtime/win32hle/kernel32_ext.c
-index 22827be..c307ad3 100644
+index 22827be..51a3761 100644
 --- a/runtime/win32hle/kernel32_ext.c
 +++ b/runtime/win32hle/kernel32_ext.c
 @@ -9,6 +9,7 @@
@@ -807,15 +817,33 @@ index 22827be..c307ad3 100644
  #include <stdint.h>
  #include <stdio.h>
  #include <stdlib.h>
-@@ -86,7 +87,7 @@ static void k_CloseHandle(void) { file_close(A32(0)); RET(1, 1); }
+@@ -86,11 +87,23 @@ static void k_CloseHandle(void) { file_close(A32(0)); RET(1, 1); }
  
  /* ---- Global* (we use GMEM_FIXED semantics: HGLOBAL == the pointer) ---- */
  #define GMEM_ZEROINIT 0x0040u
 -static void k_GlobalAlloc(void) { uint32_t fl = A32(0), n = A32(1); RETP(fl & GMEM_ZEROINIT ? calloc(1, n) : malloc(n), 2); }
-+static void k_GlobalAlloc(void) { uint32_t fl = A32(0), n = A32(1); RETP(guest_alloc(n), 2); }
- static void k_GlobalFree(void)  { free(APTR(0)); RET(0, 1); }
+-static void k_GlobalFree(void)  { free(APTR(0)); RET(0, 1); }
++static void k_GlobalAlloc(void)
++{
++    /* GMEM_FIXED: ponteiro guest == handle. GMEM_ZEROINIT/0x40 zera —
++     * sem isto o buffer nasce com lixo que lecomo ponteiro e explode
++     * no initterm dos das funcs. (DesertDroid) */
++    uint32_t fl = A32(0), n = A32(1);
++    if (fl & GMEM_ZEROINIT) {
++        uint32_t va = guest_alloc(n);
++        memset(guest_ptr(va), 0, n);
++        RETP(va, 2);
++    }
++    RETP(guest_alloc(n), 2);
++}
++static void k_GlobalFree(void)  { guest_free(A32(0)); RET(0, 1); }
  static void k_GlobalLock(void)  { RETP(APTR(0), 1); }          /* already a pointer */
  static void k_GlobalUnlock(void){ RET(1, 1); }
+-static void k_GlobalReAlloc(void){ RETP(realloc(APTR(0), A32(1)), 3); }
++static void k_GlobalReAlloc(void){ RETP(guest_realloc(A32(0), A32(1)), 3); }
+ static void k_GlobalSize(void)  { RET(0, 1); }                 /* unknown; callers rarely trust it */
+ 
+ /* ---- .ini profile: a minimal reader/writer over a flat key=value file ----
 diff --git a/runtime/win32hle/pe_loader.c b/runtime/win32hle/pe_loader.c
 index 5895336..68bd7a7 100644
 --- a/runtime/win32hle/pe_loader.c
