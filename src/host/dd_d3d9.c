@@ -582,9 +582,83 @@ COM_STUB(D3D9_Surf_UnlockRect, 2, 0)
 COM_STUB(D3D9_Surf_GetDC, 2, 0)
 COM_STUB(D3D9_Surf_ReleaseDC, 1, 0)
 
+/* ===== Registro dos shims COM (texturas / buffers / surfaces) =====
+ * Sem isto, hle_resolve("D3D9_Texture_*") volta 0 e com_object falha,
+ * entregando D3DERR_INVALIDCALL para CreateTexture/CreateVertexBuffer/
+ * CreateIndexBuffer/GetBackBuffer no primeiro uso. */
+static const win32hle_shim dd_shims_com[] = {
+    { "D3D9_Texture_QueryInterface",  D3D9_Texture_QueryInterface },
+    { "D3D9_Texture_AddRef",          D3D9_Texture_AddRef },
+    { "D3D9_Texture_Release",         D3D9_Texture_Release },
+    { "D3D9_Texture_GetDevice",       D3D9_Texture_GetDevice },
+    { "D3D9_Texture_SetPrivateData",  D3D9_Texture_SetPrivateData },
+    { "D3D9_Texture_GetPrivateData",  D3D9_Texture_GetPrivateData },
+    { "D3D9_Texture_FreePrivateData", D3D9_Texture_FreePrivateData },
+    { "D3D9_Texture_SetPriority",     D3D9_Texture_SetPriority },
+    { "D3D9_Texture_GetPriority",     D3D9_Texture_GetPriority },
+    { "D3D9_Texture_PreLoad",         D3D9_Texture_PreLoad },
+    { "D3D9_Texture_GetType",         D3D9_Texture_GetType },
+    { "D3D9_Texture_GetLevelCount",   D3D9_Texture_GetLevelCount },
+    { "D3D9_Texture_GetLevelDesc",    D3D9_Texture_GetLevelDesc },
+    { "D3D9_Texture_LockRect",        D3D9_Texture_LockRect },
+    { "D3D9_Texture_UnlockRect",      D3D9_Texture_UnlockRect },
+    { "D3D9_Texture_GetSurfaceLevel", D3D9_Texture_GetSurfaceLevel },
+
+    { "D3D9_VB_QueryInterface",  D3D9_VB_QueryInterface },
+    { "D3D9_VB_AddRef",          D3D9_VB_AddRef },
+    { "D3D9_VB_Release",         D3D9_VB_Release },
+    { "D3D9_VB_GetDevice",       D3D9_VB_GetDevice },
+    { "D3D9_VB_SetPrivateData",  D3D9_VB_SetPrivateData },
+    { "D3D9_VB_GetPrivateData",  D3D9_VB_GetPrivateData },
+    { "D3D9_VB_FreePrivateData", D3D9_VB_FreePrivateData },
+    { "D3D9_VB_SetPriority",     D3D9_VB_SetPriority },
+    { "D3D9_VB_GetPriority",     D3D9_VB_GetPriority },
+    { "D3D9_VB_PreLoad",         D3D9_VB_PreLoad },
+    { "D3D9_VB_GetType",         D3D9_VB_GetType },
+    { "D3D9_VB_Lock",            D3D9_VB_Lock },
+    { "D3D9_VB_Unlock",          D3D9_VB_Unlock },
+    { "D3D9_VB_GetDesc",         D3D9_VB_GetDesc },
+
+    { "D3D9_IB_QueryInterface",  D3D9_IB_QueryInterface },
+    { "D3D9_IB_AddRef",          D3D9_IB_AddRef },
+    { "D3D9_IB_Release",         D3D9_IB_Release },
+    { "D3D9_IB_GetDevice",       D3D9_IB_GetDevice },
+    { "D3D9_IB_SetPrivateData",  D3D9_IB_SetPrivateData },
+    { "D3D9_IB_GetPrivateData",  D3D9_IB_GetPrivateData },
+    { "D3D9_IB_FreePrivateData", D3D9_IB_FreePrivateData },
+    { "D3D9_IB_SetPriority",     D3D9_IB_SetPriority },
+    { "D3D9_IB_GetPriority",     D3D9_IB_GetPriority },
+    { "D3D9_IB_PreLoad",         D3D9_IB_PreLoad },
+    { "D3D9_IB_GetType",         D3D9_IB_GetType },
+    { "D3D9_IB_Lock",            D3D9_IB_Lock },
+    { "D3D9_IB_Unlock",          D3D9_IB_Unlock },
+    { "D3D9_IB_GetDesc",         D3D9_IB_GetDesc },
+
+    { "D3D9_Surf_QueryInterface",   D3D9_Surf_QueryInterface },
+    { "D3D9_Surf_AddRef",           D3D9_Surf_AddRef },
+    { "D3D9_Surf_Release",          D3D9_Surf_Release },
+    { "D3D9_Surf_GetDevice",        D3D9_Surf_GetDevice },
+    { "D3D9_Surf_SetPrivateData",   D3D9_Surf_SetPrivateData },
+    { "D3D9_Surf_GetPrivateData",   D3D9_Surf_GetPrivateData },
+    { "D3D9_Surf_FreePrivateData",  D3D9_Surf_FreePrivateData },
+    { "D3D9_Surf_SetPriority",      D3D9_Surf_SetPriority },
+    { "D3D9_Surf_GetPriority",      D3D9_Surf_GetPriority },
+    { "D3D9_Surf_PreLoad",          D3D9_Surf_PreLoad },
+    { "D3D9_Surf_GetType",          D3D9_Surf_GetType },
+    { "D3D9_Surf_GetContainer",     D3D9_Surf_GetContainer },
+    { "D3D9_Surf_GetDesc",          D3D9_Surf_GetDesc },
+    { "D3D9_Surf_LockRect",         D3D9_Surf_LockRect },
+    { "D3D9_Surf_UnlockRect",       D3D9_Surf_UnlockRect },
+    { "D3D9_Surf_GetDC",            D3D9_Surf_GetDC },
+    { "D3D9_Surf_ReleaseDC",        D3D9_Surf_ReleaseDC },
+
+    { NULL, NULL }
+};
+
 void dd_d3d9_register(void)
 {
     win32hle_register(dd_shims_d3d9_reg);
+    win32hle_register(dd_shims_com);
 }
 
 /* ---- GetProcAddress de verdade (override newest-wins) ---- */
