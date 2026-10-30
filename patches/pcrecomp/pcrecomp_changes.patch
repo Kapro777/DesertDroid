@@ -239,10 +239,10 @@ index fda6994..39ec227 100644
  
 diff --git a/runtime/recomp32/recomp_simd.h b/runtime/recomp32/recomp_simd.h
 new file mode 100644
-index 0000000..a4518ba
+index 0000000..82ea0d3
 --- /dev/null
 +++ b/runtime/recomp32/recomp_simd.h
-@@ -0,0 +1,81 @@
+@@ -0,0 +1,135 @@
 +/*
 + * recomp_simd.h - the SSE register file and helpers behind tools/lift/simd32.py.
 + *
@@ -273,7 +273,7 @@ index 0000000..a4518ba
 +    int64_t  i64[2];
 +} V128;
 +
-+extern V128     g_xmm[8];
++extern V128     g_xmm[8];          /* tentative: -fcommon merges it with every TU */
 +extern uint32_t g_mxcsr;          /* only the rounding field (bits 13-14) is honoured */
 +
 +static inline V128 v128_q(uint64_t q) { V128 v; v.u64[0] = q; v.u64[1] = 0; return v; }
@@ -321,6 +321,60 @@ index 0000000..a4518ba
 +    if (a < b) return 0x01u;
 +    if (a == b) return 0x40u;
 +    return 0u;
++}
++
++/* CMPSD/CMPPD predicate mask: ~0ull where the (+o) compare holds, 0 elsewhere.
++ * pred is the imm8's low three bits: 0 EQ, 1 LT, 2 LE, 3 UNORD, 4 NEQ,
++ * 5 NLT, 6 NLE, 7 ORD. NaN compares rely on C's operator semantics
++ * (a < b is false for NaN and the ordered predicates pick that up), which is
++ * exactly what the ISA encodes for the ordered/unordered families. */
++static inline uint64_t simd_cmp_mask(uint32_t pred, double a, double b) {
++    switch (pred & 7u) {
++    case 0:  return a == b ? 0xFFFFFFFFFFFFFFFFull : 0;
++    case 1:  return a <  b ? 0xFFFFFFFFFFFFFFFFull : 0;
++    case 2:  return a <= b ? 0xFFFFFFFFFFFFFFFFull : 0;
++    case 3:  return a != a || b != b ? 0xFFFFFFFFFFFFFFFFull : 0;
++    case 4:  return a != b ? 0xFFFFFFFFFFFFFFFFull : 0;
++    case 5:  return a >= b ? 0xFFFFFFFFFFFFFFFFull : 0;
++    case 6:  return a >  b ? 0xFFFFFFFFFFFFFFFFull : 0;
++    default: return a == a && b == b ? 0xFFFFFFFFFFFFFFFFull : 0;
++    }
++}
++
++/* PMOVMSKB: the sign bit of every byte lane, collected into a mask. */
++static inline uint32_t simd_pmovmskb(V128 v) {
++    uint32_t r = 0;
++    for (int i = 0; i < 16; i++) r |= (uint32_t)(v.u8[i] >> 7) << i;
++    return r;
++}
++
++/* The packed-integer stragglers the 32-bit CRT boils down to once each,
++ * written whole-register so the emitted C stays one line per instruction. */
++static inline V128 simd_pcmpeqd(V128 a, V128 b) {
++    V128 r;
++    for (int i = 0; i < 4; i++) r.u32[i] = a.u32[i] == b.u32[i] ? 0xFFFFFFFFu : 0;
++    return r;
++}
++static inline V128 simd_paddq(V128 a, V128 b) {
++    V128 r;
++    for (int i = 0; i < 2; i++) r.u64[i] = a.u64[i] + b.u64[i];
++    return r;
++}
++static inline V128 simd_psubq(V128 a, V128 b) {
++    V128 r;
++    for (int i = 0; i < 2; i++) r.u64[i] = a.u64[i] - b.u64[i];
++    return r;
++}
++static inline V128 simd_pmaxsw(V128 a, V128 b) {
++    V128 r;
++    for (int i = 0; i < 8; i++)
++        r.i16[i] = a.i16[i] > b.i16[i] ? a.i16[i] : b.i16[i];
++    return r;
++}
++static inline V128 simd_pshufd(V128 s, uint32_t imm) {
++    V128 r;
++    for (int i = 0; i < 4; i++) r.u32[i] = s.u32[(imm >> (2 * i)) & 3u];
++    return r;
 +}
 +
 +#endif
@@ -1154,3 +1208,327 @@ index 5895336..68bd7a7 100644
              } else {
                  const char *name = (const char *)(uintptr_t)(base + *ilt + 2); /* skip hint word */
                  va = resolve(name);
+diff --git a/tools/lift/lift32.py b/tools/lift/lift32.py
+index e76be9f..4e9bd78 100644
+--- a/tools/lift/lift32.py
++++ b/tools/lift/lift32.py
+@@ -21,12 +21,36 @@ from capstone.x86 import (
+     X86_REG_CS, X86_REG_DS, X86_REG_ES, X86_REG_SS,
+     X86_REG_ST0,
+     X86_REG_MM0,
++    X86_REG_XMM0,
+ )
+ 
+ 
+ # MMX: mm0..mm7 are eight 64-bit registers. Their C home is _mm[0..7].
+ MMX_REGS = {X86_REG_MM0 + i: i for i in range(8)}
+ 
++# SSE2: the 32-bit code sees only the low eight XMM registers; x87-32 images
++# compiled by MSVC with /fp:fast or SSE2 codegen (every VS2008+ CRT does) touch
++# nothing else. Their C home is the V128 file g_xmm[0..7] (recomp_simd.h).
++XMM_REGS = {X86_REG_XMM0 + i: i for i in range(8)}
++
++# Scalar-double (SD) arithmetic: one C operator on the low lane, high lane kept.
++SSE_SCALAR_DBL = {'addsd': '+', 'subsd': '-', 'mulsd': '*', 'divsd': '/',
++                  'sqrtsd': None}
++# Packed-double (PD) arithmetic: both lanes. Memory sources are m128 only.
++SSE_PACKED_DBL = {'addpd': '+', 'subpd': '-', 'mulpd': '*', 'divpd': '/'}
++# CMPSD/CMPPD predicates Capstone bakes into the mnemonic. (False = the sd
++# single-lane form; True = the pd two-lane form, which is register-only.)
++SSE_CMP_PRED = {
++    'cmpeqsd': (0, False), 'cmpltsd': (1, False), 'cmplesd': (2, False),
++    'cmpunordsd': (3, False), 'cmpneqsd': (4, False), 'cmpnltsd': (5, False),
++    'cmpnlesd': (6, False), 'cmpordsd': (7, False),
++    'cmpeqpd': (0, True), 'cmpltpd': (1, True), 'cmplepd': (2, True),
++    'cmpunordpd': (3, True), 'cmpneqpd': (4, True), 'cmpnltpd': (5, True),
++    'cmpnlepd': (6, True), 'cmpordpd': (7, True),
++}
++# Bitwise packed ops, one operator per lane over both quadwords.
++SSE_BITWISE = {'andpd': '&', 'orpd': '|', 'xorpd': '^'}
++
+ # Packed operations, as C expressions over two uint64_t. The bitwise ones need no
+ # helper; everything element-wise lives beside the register file in the runtime.
+ MMX_BINOPS = {
+@@ -295,6 +319,29 @@ class Lifter:
+             return f"(_mm[{MMX_REGS[op.reg]}] > 63 ? 64 : (uint32_t)_mm[{MMX_REGS[op.reg]}])"
+         return f"(uint32_t)({self._fmt_read(op)})"
+ 
++    # ---- SSE2 operand formatting ---------------------------------------
++    # These mirror the _mm_* helpers above. A memory operand goes through the
++    # same ADDR() arithmetic every other lifted access uses; the memcpy in
++    # rdv128/wrv128 makes m128 alignment a non-issue, exactly like movups.
++    def _xmm_read(self, op) -> str:
++        """An xvalue of the WHOLE register (or a memcpy'd 16-byte load)."""
++        if op.type == X86_OP_REG and op.reg in XMM_REGS:
++            return f"g_xmm[{XMM_REGS[op.reg]}]"
++        return f"rdv128({self._fmt_mem_addr(op.mem)})"
++
++    def _xmm_write(self, op, value: str) -> str:
++        """Assign a whole V128 to an operand (word store for memory)."""
++        if op.type == X86_OP_REG and op.reg in XMM_REGS:
++            return f"g_xmm[{XMM_REGS[op.reg]}] = {value}"
++        return f"wrv128({self._fmt_mem_addr(op.mem)}, {value})"
++
++    def _xmm_dbl(self, op, lane: int = 0) -> str:
++        """One double lane of an operand: the register's f64[lane], or the
++        m64 the encoding references (movlpd/movsd/comisd/cvt-mem forms)."""
++        if op.type == X86_OP_REG and op.reg in XMM_REGS:
++            return f"g_xmm[{XMM_REGS[op.reg]}].f64[{lane}]"
++        return f"rdmf64({self._fmt_mem_addr(op.mem)})"
++
+     def _fmt_read(self, op) -> str:
+         """Format an operand for reading (rvalue)."""
+         if op.type == X86_OP_REG:
+@@ -1982,14 +2029,45 @@ class Lifter:
+             lines.append(f"{self._mm_write(ops[0], expr)}; {comment}")
+ 
+         elif m == 'movq':
+-            lines.append(f"{self._mm_write(ops[0], self._mm_read(ops[1]))}; {comment}")
++            # 66 0F 6E/7E and friends: 64 bits between an XMM register and an
++            # xmm/m64/gpr32, zero-extending on the way in; the reg-reg form
++            # moves the low quadword and clears the high one. The MMX forms
++            # below still go through the _mm file.
++            if any(o.type == X86_OP_REG and o.reg in XMM_REGS for o in ops[:2]):
++                if ops[0].type == X86_OP_REG and ops[0].reg in XMM_REGS:
++                    if ops[1].type == X86_OP_REG and ops[1].reg in XMM_REGS:
++                        lo = f"{self._xmm_read(ops[1])}.u64[0]"
++                    elif ops[1].type == X86_OP_REG:
++                        lo = f"(uint64_t)(uint32_t)({self._fmt_read(ops[1])})"
++                    elif ops[1].type == X86_OP_MEM:
++                        lo = f"rdm64({self._fmt_mem_addr(ops[1].mem)})"
++                    else:
++                        lo = None   # plain invalid; nothing to emit
++                    if lo is not None:
++                        lines.append(f"{{ V128 _v; _v.u64[0] = {lo}; _v.u64[1] = 0; "
++                                     f"{self._xmm_write(ops[0], '_v')}; }} {comment}")
++                elif ops[0].type == X86_OP_MEM:
++                    lines.append(f"wrm64({self._fmt_mem_addr(ops[0].mem)}, "
++                                 f"{self._xmm_read(ops[1])}.u64[0]); {comment}")
++                else:   # movq r32, xmm (F3 0F 7E): the low dword
++                    lines.append(f"{self._fmt_write(ops[0], f'{self._xmm_read(ops[1])}.u32[0]')}; {comment}")
++            else:
++                lines.append(f"{self._mm_write(ops[0], self._mm_read(ops[1]))}; {comment}")
+ 
+         elif m == 'movd':
+-            # 32 bits between an MMX register and a GPR or memory, zero-extended
+-            # on the way in and truncated on the way out.
++            # 32 bits between an MMX or XMM register and a GPR or memory,
++            # zero-extended on the way in and truncated on the way out.
+             if ops[0].type == X86_OP_REG and ops[0].reg in MMX_REGS:
+                 src = self._fmt_read(ops[1])
+                 lines.append(f"_mm[{MMX_REGS[ops[0].reg]}] = (uint64_t)(uint32_t)({src}); {comment}")
++            elif ops[0].type == X86_OP_REG and ops[0].reg in XMM_REGS:
++                if ops[1].type == X86_OP_REG and ops[1].reg in XMM_REGS:
++                    src = f"{self._xmm_read(ops[1])}.u32[0]"
++                else:
++                    src = self._fmt_read(ops[1])
++                lines.append(f"{self._xmm_write(ops[0], 'v128_d(' + src + ')')}; {comment}")
++            elif ops[1].type == X86_OP_REG and ops[1].reg in XMM_REGS:
++                lines.append(f"{self._fmt_write(ops[0], f'{self._xmm_read(ops[1])}.u32[0]')}; {comment}")
+             else:
+                 lines.append(f"{self._fmt_write(ops[0], f'(uint32_t){self._mm_read(ops[1])}')}; {comment}")
+ 
+@@ -1998,6 +2076,203 @@ class Lifter:
+             # no aliasing to undo. See the register file in the runtime header.
+             lines.append(f"/* emms */ {comment}")
+ 
++        # --- SSE2 (VS2008+/x87-32 images live here): the V128 file g_xmm ---
++        # Moves: movapd/movdqa/movdqu/movups copy all 128 bits; movsd/movlpd
++        # are the 64-bit forms (movsd reg-reg copies BOTH quadwords, its mem
++        # forms zero-extend the high half / store the low one; movlpd, which
++        # has no reg-reg form, preserves the high half of the destination).
++        elif m in ('movapd', 'movdqa', 'movdqu', 'movups'):
++            if len(ops) == 2:
++                lines.append(f"{self._xmm_write(ops[0], self._xmm_read(ops[1]))}; {comment}")
++
++        elif m == 'movsd':
++            if len(ops) == 2:
++                if ops[0].type == X86_OP_REG and ops[1].type == X86_OP_REG \
++                        and ops[0].reg in XMM_REGS and ops[1].reg in XMM_REGS:
++                    lines.append(f"{self._xmm_write(ops[0], self._xmm_read(ops[1]))}; {comment}")
++                elif ops[0].type == X86_OP_REG and ops[0].reg in XMM_REGS:
++                    lines.append(f"{{ V128 _v; _v.u64[0] = rdm64({self._fmt_mem_addr(ops[1].mem)}); "
++                                 f"_v.u64[1] = 0; {self._xmm_write(ops[0], '_v')}; }} {comment}")
++                elif ops[0].type == X86_OP_MEM:
++                    lines.append(f"wrm64({self._fmt_mem_addr(ops[0].mem)}, "
++                                 f"{self._xmm_read(ops[1])}.u64[0]); {comment}")
++
++        elif m == 'movlpd':
++            if len(ops) == 2:
++                if ops[0].type == X86_OP_REG and ops[0].reg in XMM_REGS:
++                    lines.append(f"g_xmm[{XMM_REGS[ops[0].reg]}].u64[0] = "
++                                 f"rdm64({self._fmt_mem_addr(ops[1].mem)}); {comment}")
++                elif ops[0].type == X86_OP_MEM:
++                    lines.append(f"wrm64({self._fmt_mem_addr(ops[0].mem)}, "
++                                 f"{self._xmm_read(ops[1])}.u64[0]); {comment}")
++
++        # Scalar double: only the low lane changes, the high lane is kept.
++        elif m in SSE_SCALAR_DBL:
++            if len(ops) == 2 and ops[0].type == X86_OP_REG and ops[0].reg in XMM_REGS:
++                dst = f"g_xmm[{XMM_REGS[ops[0].reg]}]"
++                src = self._xmm_dbl(ops[1])
++                sym = SSE_SCALAR_DBL[m]
++                if sym:
++                    lines.append(f"{dst}.f64[0] = {dst}.f64[0] {sym} ({src}); {comment}")
++                else:  # sqrtsd
++                    lines.append(f"{dst}.f64[0] = sqrt({src}); {comment}")
++
++        # Packed double: both lanes, m128 memory sources only. The _a/_b
++        # snapshots keep a self-referencing dst or a mem src from turning
++        # into two reads of a value an earlier lane just overwrote.
++        elif m in SSE_PACKED_DBL:
++            if len(ops) == 2 and ops[0].type == X86_OP_REG and ops[0].reg in XMM_REGS:
++                sym = SSE_PACKED_DBL[m]
++                dst = f"g_xmm[{XMM_REGS[ops[0].reg]}]"
++                lines.append(f"{{ V128 _a = {dst}, _b = {self._xmm_read(ops[1])}; "
++                             f"{dst}.f64[0] = _a.f64[0] {sym} _b.f64[0]; "
++                             f"{dst}.f64[1] = _a.f64[1] {sym} _b.f64[1]; }} {comment}")
++
++        elif m == 'andnpd':
++            if len(ops) == 2 and ops[0].type == X86_OP_REG and ops[0].reg in XMM_REGS:
++                dst = f"g_xmm[{XMM_REGS[ops[0].reg]}]"
++                src = self._xmm_read(ops[1])
++                lines.append(f"{dst}.u64[0] = ~{dst}.u64[0] & {src}.u64[0]; "
++                             f"{dst}.u64[1] = ~{dst}.u64[1] & {src}.u64[1]; {comment}")
++
++        elif m in SSE_BITWISE:
++            if len(ops) == 2 and ops[0].type == X86_OP_REG and ops[0].reg in XMM_REGS:
++                sym = SSE_BITWISE[m]
++                dst = f"g_xmm[{XMM_REGS[ops[0].reg]}]"
++                src = self._xmm_read(ops[1])
++                lines.append(f"{dst}.u64[0] = {dst}.u64[0] {sym} {src}.u64[0]; "
++                             f"{dst}.u64[1] = {dst}.u64[1] {sym} {src}.u64[1]; {comment}")
++
++        # Lane shuffles. The m64 forms are legal for both unpck*pd (the m64 IS
++        # the referenced lane), which is why the src expression comes out of
++        # _xmm_dbl(ops[1], lane) rather than a whole-register read.
++        elif m in ('unpcklpd', 'unpckhpd'):
++            if len(ops) == 2 and ops[0].type == X86_OP_REG and ops[0].reg in XMM_REGS:
++                dst = f"g_xmm[{XMM_REGS[ops[0].reg]}]"
++                if m == 'unpcklpd':
++                    lines.append(f"{dst}.f64[1] = ({self._xmm_dbl(ops[1], 0)}); {comment}")
++                else:
++                    lines.append(f"{{ double _d1 = {dst}.f64[1]; "
++                                 f"{dst}.f64[0] = _d1; "
++                                 f"{dst}.f64[1] = ({self._xmm_dbl(ops[1], 1)}); }} {comment}")
++
++        # SHUFPD imm: the low result lane selects from the SRC operand, the
++        # high result lane from the DESTINATION as it was.
++        elif m == 'shufpd':
++            if len(ops) == 3 and ops[0].type == X86_OP_REG and ops[0].reg in XMM_REGS \
++                    and ops[2].type == X86_OP_IMM:
++                dst = f"g_xmm[{XMM_REGS[ops[0].reg]}]"
++                imm = ops[2].imm & 3
++                lines.append(f"{{ V128 _s = {self._xmm_read(ops[1])}; "
++                             f"double _b0 = _s.f64[{imm & 1}]; "
++                             f"double _b1 = {dst}.f64[{(imm >> 1) & 1}]; "
++                             f"{dst}.f64[0] = _b0; {dst}.f64[1] = _b1; }} {comment}")
++
++        # Two-operand compares with the predicate baked into the mnemonic.
++        elif m in SSE_CMP_PRED:
++            if len(ops) == 2 and ops[0].type == X86_OP_REG and ops[0].reg in XMM_REGS:
++                pred, packed = SSE_CMP_PRED[m]
++                dst = f"g_xmm[{XMM_REGS[ops[0].reg]}]"
++                if packed and ops[1].type == X86_OP_REG:
++                    lines.append(f"{{ V128 _s = {self._xmm_read(ops[1])}; "
++                                 f"{dst}.u64[0] = simd_cmp_mask({pred}, {dst}.f64[0], _s.f64[0]); "
++                                 f"{dst}.u64[1] = simd_cmp_mask({pred}, {dst}.f64[1], _s.f64[1]); }} {comment}")
++                else:
++                    lines.append(f"{dst}.u64[0] = simd_cmp_mask({pred}, {dst}.f64[0], "
++                                 f"({self._xmm_dbl(ops[1])})); {comment}")
++
++        # (U)COMISD: their flags land in the EFLAGS-image state, and the
++        # local _cf mirrors bit 0 the way sahf does.
++        elif m in ('comisd', 'ucomisd'):
++            if len(ops) == 2 and ops[0].type == X86_OP_REG and ops[0].reg in XMM_REGS:
++                dst = f"g_xmm[{XMM_REGS[ops[0].reg]}]"
++                lines.append(f"_flag_a = simd_comi_eflags({dst}.f64[0], "
++                             f"({self._xmm_dbl(ops[1])})); _flag_b = 0; "
++                             f"_cf = _flag_a & 1u; {comment}")
++                self._flag_state = ('eflags', '_flag_a, _flag_b')
++                self._flag_seq += 1
++
++        # Conversions. cvttsd2si takes truncation even for out-of-range and
++        # NaN (the "integer indefinite" business is simd_cvtt_i32's); cvtsd2si
++        # rounds per MXCSR. cvtsi2sd/cvtdq2pd only touch the low lanes.
++        elif m == 'cvttsd2si':
++            if len(ops) == 2:
++                lines.append(f"{self._fmt_write(ops[0], f'((uint32_t)simd_cvtt_i32({self._xmm_dbl(ops[1])}))')}; {comment}")
++
++        elif m == 'cvtsd2si':
++            if len(ops) == 2:
++                lines.append(f"{self._fmt_write(ops[0], f'((uint32_t)simd_cvt_i32({self._xmm_dbl(ops[1])}))')}; {comment}")
++
++        elif m == 'cvtsi2sd':
++            if len(ops) == 2 and ops[0].type == X86_OP_REG and ops[0].reg in XMM_REGS:
++                dst = f"g_xmm[{XMM_REGS[ops[0].reg]}]"
++                src = self._fmt_read(ops[1])      # r/m32, read as a signed int
++                lines.append(f"{dst}.f64[0] = (double)(int32_t)({src}); {comment}")
++
++        elif m == 'cvtdq2pd':
++            if len(ops) == 2 and ops[0].type == X86_OP_REG and ops[0].reg in XMM_REGS:
++                dst = f"g_xmm[{XMM_REGS[ops[0].reg]}]"
++                lines.append(f"{{ V128 _s = {self._xmm_read(ops[1])}; "
++                             f"{dst}.f64[0] = (double)_s.i32[0]; "
++                             f"{dst}.f64[1] = (double)_s.i32[1]; }} {comment}")
++
++        # MXCSR round-trips: our model carries only the rounding field, which
++        # is all the CTS floats ever touch (fp:fast codegen sets/burns 0x0000).
++        elif m == 'stmxcsr' or m == 'ldmxcsr':
++            if ops and ops[0].type == X86_OP_MEM:
++                addr = self._fmt_mem_addr(ops[0].mem)
++                if m == 'stmxcsr':
++                    lines.append(f"MEM32({addr}) = g_mxcsr; {comment}")
++                else:
++                    lines.append(f"g_mxcsr = MEM32({addr}); {comment}")
++
++        # The packed-integer stragglers.
++        elif m == 'pextrw':
++            if len(ops) == 3 and ops[2].type == X86_OP_IMM \
++                    and ops[1].type == X86_OP_REG and ops[1].reg in XMM_REGS:
++                val = f"(uint32_t){self._xmm_read(ops[1])}.u16[{ops[2].imm & 7}]"
++                lines.append(f"{self._fmt_write(ops[0], val)}; {comment}")
++
++        elif m == 'pinsrw':
++            if len(ops) == 3 and ops[2].type == X86_OP_IMM \
++                    and ops[0].type == X86_OP_REG and ops[0].reg in XMM_REGS:
++                lane = ops[2].imm & 7
++                src = self._fmt_read(ops[1])
++                lines.append(f"g_xmm[{XMM_REGS[ops[0].reg]}].u16[{lane}] = (uint16_t)({src}); {comment}")
++
++        elif m == 'pshufd':
++            if len(ops) == 3 and ops[2].type == X86_OP_IMM \
++                    and ops[0].type == X86_OP_REG and ops[0].reg in XMM_REGS:
++                expr = f"simd_pshufd({self._xmm_read(ops[1])}, {ops[2].imm & 0xFF}u)"
++                lines.append(f"{self._xmm_write(ops[0], expr)}; {comment}")
++
++        elif m == 'pcmpeqd':
++            if len(ops) == 2 and ops[0].type == X86_OP_REG and ops[0].reg in XMM_REGS:
++                a = self._xmm_read(ops[0])
++                b = self._xmm_read(ops[1])
++                expr = f"simd_pcmpeqd({a}, {b})"
++                lines.append(f"{self._xmm_write(ops[0], expr)}; {comment}")
++
++        elif m == 'paddq' or m == 'psubq':
++            if len(ops) == 2 and ops[0].type == X86_OP_REG and ops[0].reg in XMM_REGS:
++                fn = 'simd_paddq' if m == 'paddq' else 'simd_psubq'
++                a = self._xmm_read(ops[0])
++                b = self._xmm_read(ops[1])
++                expr = f"{fn}({a}, {b})"
++                lines.append(f"{self._xmm_write(ops[0], expr)}; {comment}")
++
++        elif m == 'pmaxsw':
++            if len(ops) == 2 and ops[0].type == X86_OP_REG and ops[0].reg in XMM_REGS:
++                a = self._xmm_read(ops[0])
++                b = self._xmm_read(ops[1])
++                expr = f"simd_pmaxsw({a}, {b})"
++                lines.append(f"{self._xmm_write(ops[0], expr)}; {comment}")
++
++        elif m == 'pmovmskb':
++            if len(ops) == 2:
++                expr = f"simd_pmovmskb({self._xmm_read(ops[1])})"
++                lines.append(f"{self._fmt_write(ops[0], expr)}; {comment}")
++
+         else:
+             # A null statement, not a bare comment: this may be the only thing
+             # after a label, and C requires a label to be followed by a statement.
