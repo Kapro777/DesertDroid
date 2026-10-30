@@ -15,6 +15,7 @@
  */
 #define _GNU_SOURCE
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include "win32hle.h"
 
@@ -132,10 +133,41 @@ static void dd_ovr_memcpy(void)
     g_eax = dst;
 }
 
+/* ---- __security_check_cookie (0xEC408C, fastcall ECX) ----
+ * O lift do CRT emite um hole no path felic: 'repz ret' (F3 C3) e'
+ * UNIMPLEMENTED na alucinacao do lifter, e o C gerado cai de frente no
+ * 'jmp 0xed159c' do __raise_securityfailure ATE com cookie VALIDO —
+ * toda funcao /GS que retorna "falha" (code=0xC0000409, addr=0xdead0000
+ * no UnhandledExceptionFilter; run 40983424557). Override: compara ECX
+ * com o cookie global (0x11C16BC) e RETORNA (repz ret de verdade);
+ * mismatch real = stack smash: dumpa e aborda com diagnostico. */
+static void dd_ovr_00EC408C(void)
+{
+    extern uint32_t g_ecx;
+    extern uint32_t g_esp;
+    extern uint32_t dd_mem32(uint32_t va);
+    uint32_t cookie = dd_mem32(0x11C16BCu);
+    if (g_ecx != cookie) {
+        /* Mismatch = corrupcao real: [g_esp] e o retaddr do caller
+         * (quem passou o check) — a func liftada culpada. */
+        extern void dd_trace_dump(void);
+        uint32_t caller = dd_mem32(g_esp);
+        fprintf(stderr,
+                "[DesertDroid] GS cookie MISMATCH: ecx=%#x cookie=%#x "
+                "caller=sub_%08X (epilogo /GS)\n",
+                g_ecx, cookie, caller);
+        dd_trace_dump();
+        fprintf(stderr, "[DesertDroid] abortando (0xC0000409)\n");
+        abort();
+    }
+    /* path feliz: repz ret = retornar; o bridge devolve ao caller. */
+}
+
 void dd_crt_overrides_register(void)
 {
     dd_overrides_add(0x00ECCD14u, dd_ovr_00ECCD14);
     dd_overrides_add(0x00A5B5A0u, dd_ovr_00A5B5A0);
+    dd_overrides_add(0x00EC408Cu, dd_ovr_00EC408C); /* __security_check_cookie (repz ret) */
     dd_overrides_add(0x00EC61C0u, dd_ovr_memset);   /* memset do CRT  */
     dd_overrides_add(0x00EC44D0u, dd_ovr_memcpy);   /* memmove        */
     dd_overrides_add(0x00A5B270u, dd_ovr_00A5B270); /* format-chain: "" */
@@ -143,7 +175,8 @@ void dd_crt_overrides_register(void)
     dd_overrides_add(0x00AA30C0u, dd_ovr_00AA30C0); /* fast path MM -> geral */
     dd_overrides_add(0x00A642A0u, dd_ovr_00A642A0); /* slab allocator fast-path (livelock) */
     fprintf(stderr, "[DesertDroid] overrides CRT registrados "
-            "(00ECCD14, 00A5B5A0, memset/memcpy, 00AA30C0, 00A642A0)\n");
+            "(00ECCD14, 00A5B5A0, 00EC408C=/GS, memset/memcpy, "
+            "00AA30C0, 00A642A0)\n");
 }
 
 /* sub_00AA30C0 (vtable+0x04 do MM): fast path de alocacao via slabs do

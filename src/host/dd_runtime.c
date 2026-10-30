@@ -55,7 +55,8 @@ void recomp_unimpl(uint32_t va, const char *what)
 /* ---- overrides manuais (recomp_lookup_manual) ----
  * Funcoes cujo comeco verdadeiro nao e fronteira do catalogo (scrt, WinMain)
  * sao liftadas por tools/lift_override.py na CI e registradas aqui. */
-#define DD_MAX_OVERRIDES 16
+/* (16 nao chega: 9 do CRT + 3 tracers de init + scrt/WinMain da CI.) */
+#define DD_MAX_OVERRIDES 32
 static struct { uint32_t va; recomp_func_t fn; } g_overrides[DD_MAX_OVERRIDES];
 static int g_override_n;
 

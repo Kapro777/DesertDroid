@@ -325,7 +325,7 @@ index 0000000..a4518ba
 +
 +#endif
 diff --git a/runtime/recomp32/recomp_types.h b/runtime/recomp32/recomp_types.h
-index be47de1..d3b781d 100644
+index be47de1..0a3ed75 100644
 --- a/runtime/recomp32/recomp_types.h
 +++ b/runtime/recomp32/recomp_types.h
 @@ -43,7 +43,27 @@ extern uint32_t g_ebx, g_esi, g_edi, g_ebp;
@@ -567,7 +567,7 @@ index be47de1..d3b781d 100644
  } while(0)
  
  /* ============================================================
-@@ -1037,12 +1164,27 @@ recomp_func_t recomp_lookup_import(uint32_t va);    /* import bridges */
+@@ -1037,14 +1164,60 @@ recomp_func_t recomp_lookup_import(uint32_t va);    /* import bridges */
   * useful for pinning a crash to a function without perturbing codegen. */
  extern uint32_t g_cur_func;
  
@@ -584,19 +584,53 @@ index be47de1..d3b781d 100644
 +#define RECOMP_NATIVE_CHECK(va)
 +#endif
 +
++/* Manual override at call-time: the host may substitute any lifted function
++ * whose VA was registered via recomp_lookup_manual. For a direct
++ * RECOMP_CALL(func) site the override can only be applied HERE, at the
++ * callee's own entry, because the calling macro has no VA. Stack contract:
++ * the calling macro pushed a one-slot dummy return address (RECOMP_RETADDR);
++ * the hijack consumes exactly that slot (esp += 4), leaving any caller-
++ * cleaned (cdecl) arguments untouched. RECOMP_ICALL with a registered override
++ * invokes the host function directly and never reaches the lifted body, so no
++ * double consumption is possible; RECOMP_ITAIL never pushes a dummy and never
++ * reaches here either. The override runs only on the OUTERMOST machine claim
++ * of the thread (mach_depth() <= 1): deeper claims are hle_call_guest rounds
++ * the host used to run the ORIGINAL body of an override (recursive dispatch). */
  #ifdef RECOMP_TRACE
  #define RECOMP_ENTER_SIZE 1024
  extern uint32_t g_enter_trace[RECOMP_ENTER_SIZE];
  extern uint32_t g_enter_idx;
  void recomp_trace_enter(uint32_t va);
 -#define RECOMP_ENTER(va) do { g_cur_func = (va); RECOMP_FLAGS_IN(); recomp_trace_enter(va); } while (0)
-+#define RECOMP_ENTER(va) do { g_cur_func = (va); RECOMP_NATIVE_CHECK(va) RECOMP_FLAGS_IN(); recomp_trace_enter(va); } while (0)
++#define RECOMP_ENTER(va) do { g_cur_func = (va); \
++    { extern int mach_depth(void); \
++      if (mach_depth() <= 1) { \
++        recomp_func_t _dd_ovr_ = recomp_lookup_manual((uint32_t)(va)); \
++        if (_dd_ovr_) { RECOMP_FLAGS_IN(); recomp_trace_enter(va); \
++                        _dd_ovr_(); RECOMP_REGS_IN(); esp += 4; RECOMP_REGS_OUT(); \
++                        return; } } } \
++    RECOMP_NATIVE_CHECK(va) RECOMP_FLAGS_IN(); recomp_trace_enter(va); } while (0)
 +#elif defined(RECOMP_NATIVE_RANGE)
-+#define RECOMP_ENTER(va) do { g_cur_func = (va); RECOMP_NATIVE_CHECK(va) RECOMP_FLAGS_IN(); } while (0)
++#define RECOMP_ENTER(va) do { g_cur_func = (va); \
++    { extern int mach_depth(void); \
++      if (mach_depth() <= 1) { \
++        recomp_func_t _dd_ovr_ = recomp_lookup_manual((uint32_t)(va)); \
++        if (_dd_ovr_) { RECOMP_FLAGS_IN(); _dd_ovr_(); RECOMP_REGS_IN(); \
++                        esp += 4; RECOMP_REGS_OUT(); return; } } } \
++    RECOMP_NATIVE_CHECK(va) RECOMP_FLAGS_IN(); } while (0)
  #else
- #define RECOMP_ENTER(va) (g_cur_func = (va), RECOMP_FLAGS_IN())
+-#define RECOMP_ENTER(va) (g_cur_func = (va), RECOMP_FLAGS_IN())
++#define RECOMP_ENTER(va) do { g_cur_func = (va); \
++    { extern int mach_depth(void); \
++      if (mach_depth() <= 1) { \
++        recomp_func_t _dd_ovr_ = recomp_lookup_manual((uint32_t)(va)); \
++        if (_dd_ovr_) { RECOMP_FLAGS_IN(); _dd_ovr_(); RECOMP_REGS_IN(); \
++                        esp += 4; RECOMP_REGS_OUT(); return; } } } \
++    RECOMP_FLAGS_IN(); } while (0)
  #endif
-@@ -1066,6 +1208,13 @@ RECOMP_WEAK uint32_t g_backedges;
+ /* A backward branch in lifted code: a loop. Every RECOMP_YIELD_EVERY of them,
+  * hand the machine to other guest threads if the host has a way to
+@@ -1066,6 +1239,13 @@ RECOMP_WEAK uint32_t g_backedges;
          RECOMP_REGS_OUT(); recomp_yield_hook(); RECOMP_REGS_IN(); \
      } } while (0)
  
@@ -610,7 +644,7 @@ index be47de1..d3b781d 100644
  /* Always-callable trace dump (no-op unless RECOMP_TRACE). */
  void recomp_dump_trace(const char* why);
  
-@@ -1075,4 +1224,15 @@ void recomp_dump_trace(const char* why);
+@@ -1075,4 +1255,15 @@ void recomp_dump_trace(const char* why);
      if (!_warned) { fprintf(stderr, "STUB: %s called\n", name); _warned = 1; } \
  } while(0)
  
