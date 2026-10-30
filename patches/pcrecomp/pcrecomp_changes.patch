@@ -379,10 +379,28 @@ index 0000000..82ea0d3
 +
 +#endif
 diff --git a/runtime/recomp32/recomp_types.h b/runtime/recomp32/recomp_types.h
-index be47de1..0a3ed75 100644
+index be47de1..7bc2d22 100644
 --- a/runtime/recomp32/recomp_types.h
 +++ b/runtime/recomp32/recomp_types.h
-@@ -43,7 +43,27 @@ extern uint32_t g_ebx, g_esi, g_edi, g_ebp;
+@@ -31,6 +31,17 @@
+ /* Volatile (caller-saved) registers */
+ extern uint32_t g_eax, g_ecx, g_edx, g_esp;
+ 
++/* RDTSC: the host's monotonic clock. The lifter emits __rdtsc() for the
++ * instruction (1330 sites in FNV); the runtime implements it (dd_runtime.c
++ * defines it for POSIX hosts). Declared here so every generated TU sees a
++ * prototype: GCC treats an implicit declaration's result as int and the
++ * 64-bit timestamp in edx:eax came out truncated (first fresh lift after
++ * the rdtsc emission entered the patch — run 41112781370). On MSVC the
++ * intrinsic of the same name is used instead. */
++#ifndef _MSC_VER
++uint64_t __rdtsc(void);
++#endif
++
+ /* Callee-saved registers (also global for implicit parameter passing).
+  * ebp is global too, not a per-function local: MSVC's __EH_prolog sets its
+  * CALLER's frame pointer (lea ebp, [esp+0xC]) and returns, so a local ebp
+@@ -43,7 +54,27 @@ extern uint32_t g_ebx, g_esi, g_edi, g_ebp;
   * like __ftol receive their argument on the FPU stack from the caller, and the
   * control word persists across calls. A per-function local stack would make every
   * cross-call FPU value read as 0. */
@@ -410,7 +428,7 @@ index be47de1..0a3ed75 100644
  extern int      g_fp_top;
  extern uint16_t g_fpu_cw;
  
-@@ -108,6 +128,9 @@ extern const uint32_t recomp_dispatch_count;
+@@ -108,6 +139,9 @@ extern const uint32_t recomp_dispatch_count;
  #define RECOMP_REGS_OUT() ((void)0)
  #define RECOMP_REGS_IN() ((void)0)
  #endif
@@ -420,7 +438,7 @@ index be47de1..0a3ed75 100644
  
  #if defined(RECOMP_GENERATED_CODE) && !defined(RECOMP_LOCAL_REGS)
  #define eax g_eax
-@@ -177,12 +200,37 @@ extern uint32_t g_gs_base;
+@@ -177,12 +211,37 @@ extern uint32_t g_gs_base;
  #define FS_BASE  g_fs_base
  #define GS_BASE  g_gs_base
  
@@ -464,7 +482,7 @@ index be47de1..0a3ed75 100644
  
  /* Set 32-bit values in memory (for rep stosd) */
  static inline void MEMSET32(void* dst, uint32_t val, uint32_t count) {
-@@ -284,10 +332,14 @@ static inline uint16_t _pop16(uint32_t *sp) {
+@@ -284,10 +343,14 @@ static inline uint16_t _pop16(uint32_t *sp) {
  #define CMP_BE(a, b)   ((uint32_t)(a) <= (uint32_t)(b))     /* unsigned <= */
  #define CMP_A(a, b)    ((uint32_t)(a) > (uint32_t)(b))      /* unsigned > */
  #define CMP_AE(a, b)   ((uint32_t)(a) >= (uint32_t)(b))     /* unsigned >= */
@@ -483,7 +501,7 @@ index be47de1..0a3ed75 100644
  #define CMP_S(a, b)    ((int32_t)((uint32_t)(a) - (uint32_t)(b)) < 0)  /* sign flag */
  #define CMP_NS(a, b)   ((int32_t)((uint32_t)(a) - (uint32_t)(b)) >= 0)
  #define CMP_O(a, b)    0  /* TODO: overflow detection */
-@@ -298,10 +350,10 @@ static inline uint16_t _pop16(uint32_t *sp) {
+@@ -298,10 +361,10 @@ static inline uint16_t _pop16(uint32_t *sp) {
  /* Test-based conditions (from test a, b) */
  #define TEST_Z(a, b)   (((uint32_t)(a) & (uint32_t)(b)) == 0)
  #define TEST_NZ(a, b)  (((uint32_t)(a) & (uint32_t)(b)) != 0)
@@ -498,7 +516,7 @@ index be47de1..0a3ed75 100644
  
  /* Bit test (from bt) */
  #define BT_CF(base, bit) (((uint32_t)(base) >> ((uint32_t)(bit) & 31)) & 1)
-@@ -816,6 +868,36 @@ static inline uint64_t mmx_pcmpgtw(uint64_t a, uint64_t b) {
+@@ -816,6 +879,36 @@ static inline uint64_t mmx_pcmpgtw(uint64_t a, uint64_t b) {
  #else
  #define RECOMP_SHARED_DATA __attribute__((weak))
  #endif
@@ -535,7 +553,7 @@ index be47de1..0a3ed75 100644
  RECOMP_SHARED_DATA int64_t g_st_i64[8] = {0};
  
  static inline void fp_push_impl(double* st, int* top, double val) {
-@@ -834,6 +916,7 @@ static inline double fp_pop_impl(double* st, int* top) {
+@@ -834,6 +927,7 @@ static inline double fp_pop_impl(double* st, int* top) {
      (*top)--;
      return val;
  }
@@ -543,7 +561,7 @@ index be47de1..0a3ed75 100644
  
  #define fp_push(val) fp_push_impl(_st, &_fp_top, (val))
  #define fp_pop()     fp_pop_impl(_st, &_fp_top)
-@@ -914,7 +997,38 @@ static inline void CPUID_impl(uint32_t eax_val, uint32_t ebx_val, uint32_t ecx_v
+@@ -914,7 +1008,38 @@ static inline void CPUID_impl(uint32_t eax_val, uint32_t ebx_val, uint32_t ecx_v
      if (eax_val == 0x80000001u) g_edx &= g_cpuid_edx_ext;
      (void)ebx_val; (void)edx_val;
  #else
@@ -583,7 +601,7 @@ index be47de1..0a3ed75 100644
  #endif
  }
  
-@@ -970,6 +1084,19 @@ recomp_func_t recomp_lookup_import(uint32_t va);    /* import bridges */
+@@ -970,6 +1095,19 @@ recomp_func_t recomp_lookup_import(uint32_t va);    /* import bridges */
   * function whose first `je` tests the helper's ZF (Bunghole in One's ball
   * never moved). */
  
@@ -603,7 +621,7 @@ index be47de1..0a3ed75 100644
  /* Direct call to a known recompiled function */
  #define RECOMP_CALL(func) do { \
      uint32_t _caller = g_cur_func; \
-@@ -1004,7 +1131,7 @@ recomp_func_t recomp_lookup_import(uint32_t va);    /* import bridges */
+@@ -1004,7 +1142,7 @@ recomp_func_t recomp_lookup_import(uint32_t va);    /* import bridges */
           * `esp += 4` here shifted the caller's stack by one slot per miss. \
           * (Nocturne's CRT init runner lost its saved registers that way and \
           * skipped ~90 static constructors after its first unlifted entry.) */ \
@@ -612,7 +630,7 @@ index be47de1..0a3ed75 100644
          eax = 0; \
      } \
  } while(0)
-@@ -1022,7 +1149,7 @@ recomp_func_t recomp_lookup_import(uint32_t va);    /* import bridges */
+@@ -1022,7 +1160,7 @@ recomp_func_t recomp_lookup_import(uint32_t va);    /* import bridges */
      if (_fn) { RECOMP_FLAGS_OUT(); RECOMP_REGS_OUT(); _fn(); RECOMP_REGS_IN(); } \
      else if (_va == RECOMP_RETADDR) { /* setjmp and friends return by jumping \
          to the saved return address; that is a return, not a missing target. */ } \
@@ -621,7 +639,7 @@ index be47de1..0a3ed75 100644
  } while(0)
  
  /* ============================================================
-@@ -1037,14 +1164,60 @@ recomp_func_t recomp_lookup_import(uint32_t va);    /* import bridges */
+@@ -1037,14 +1175,60 @@ recomp_func_t recomp_lookup_import(uint32_t va);    /* import bridges */
   * useful for pinning a crash to a function without perturbing codegen. */
  extern uint32_t g_cur_func;
  
@@ -684,7 +702,7 @@ index be47de1..0a3ed75 100644
  #endif
  /* A backward branch in lifted code: a loop. Every RECOMP_YIELD_EVERY of them,
   * hand the machine to other guest threads if the host has a way to
-@@ -1066,6 +1239,13 @@ RECOMP_WEAK uint32_t g_backedges;
+@@ -1066,6 +1250,13 @@ RECOMP_WEAK uint32_t g_backedges;
          RECOMP_REGS_OUT(); recomp_yield_hook(); RECOMP_REGS_IN(); \
      } } while (0)
  
@@ -698,7 +716,7 @@ index be47de1..0a3ed75 100644
  /* Always-callable trace dump (no-op unless RECOMP_TRACE). */
  void recomp_dump_trace(const char* why);
  
-@@ -1075,4 +1255,15 @@ void recomp_dump_trace(const char* why);
+@@ -1075,4 +1266,15 @@ void recomp_dump_trace(const char* why);
      if (!_warned) { fprintf(stderr, "STUB: %s called\n", name); _warned = 1; } \
  } while(0)
  
