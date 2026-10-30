@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <math.h>
 #include "win32hle.h"
 
 /* ---------- KERNEL32 ---------- */
@@ -409,15 +410,169 @@ static void v_ov_pcm_total(void)     { RET(0, 1); }
 static void v_ov_read(void)          { RET(0, 6); }
 static void v_ov_seekable(void)      { RET(0, 1); }
 
+/* ---------- USER32 (caminho do WinMain: janela, teclado, enumeração) ----------
+ * Todos faltavam: import sem shim = hle_unimplemented -> hle_fatal (aborta).
+ * Sequência do WinMain após o GetSystemMetrics: GetActiveWindow@0x86B343,
+ * AdjustWindowRect@0x86AF0C, GetWindow, hooks de teclado (GetAsyncKeyState...). */
+static void u_GetWindow(void)              { RET(0, 2); }   /* NULL */
+static void u_ShowCursor(void)             { RET(1, 1); }
+static void u_GetDoubleClickTime(void)     { RET(500, 0); }
+static void u_SwapMouseButton(void)        { RET(1, 1); }
+static void u_UnhookWindowsHookEx(void)    { RET(1, 1); }
+static void u_SetWindowsHookExA(void)      { RET(0, 4); }   /* NULL: sem hook */
+static void u_CallNextHookEx(void)         { RET(0, 4); }
+static void u_EnumChildWindows(void)       { RET(1, 3); }   /* TRUE: nenhuma filha */
+static void u_GetActiveWindow(void)        { RET(0, 0); }
+static void u_GetAsyncKeyState(void)       { RET(0, 1); }
+static void u_GetClassLongA(void)          { RET(0, 2); }
+static void u_EnumDisplayDevicesA(void)    { RET(0, 4); }   /* FALSE: só o default */
+static void u_AdjustWindowRect(void)       { RET(1, 3); }   /* TRUE: sem ajuste */
+static void u_SendInput(void)              { RET(0, 3); }
+static void u_GetWindowTextA(void)
+{
+    uint32_t buf = APTR(1);
+    if (buf) MEM8(buf) = 0;
+    RET(0, 3);
+}
+
+/* ---------- KERNEL32 (tempo/console/debug — faltavam no censo) ---------- */
+static void k2_CompareFileTime(void)       { RET(0, 2); }   /* iguais */
+static void k2_FormatMessageA(void)        { uint32_t b = APTR(4);
+                                              if (b) MEM8(b) = 0; RET(0, 6); }
+static void k2_FileTimeToSystemTime(void)  { void *st = (void *)APTR(1);
+                                              if (st) memset(st, 0, 16); RET(1, 2); }
+static void k2_FileTimeToLocalFileTime(void){ uint32_t l = APTR(1);
+                                              if (l) MEM64(l) = MEM64(APTR(0)); RET(1, 2); }
+static void k2_SystemTimeToTzSpecificLocalTime(void)
+{
+    uint32_t lst = APTR(2);
+    if (lst) for (int i = 0; i < 4; i++) MEM32(lst + 4 * i) = MEM32(APTR(1) + 4 * i);
+    RET(1, 3);
+}
+static void k2_DebugBreak(void)            { RETV(0); }
+static void k2_SetFilePointerEx(void)      { uint32_t nw = APTR(2);
+                                              if (nw) MEM64(nw) = 0; RET(1, 4); }
+static void k2_WriteConsoleA(void)         { uint32_t w = APTR(3);
+                                              if (w) MEM32(w) = A32(2); RET(1, 5); }
+static void k2_WriteConsoleW(void)         { uint32_t w = APTR(3);
+                                              if (w) MEM32(w) = A32(2); RET(1, 5); }
+
+/* ---------- binkw32 (vídeos de logo: falha limpa = NULL/void) ---------- */
+static void b_BinkOpen(void)               { RET(0, 2); }
+static void b_BinkOpenDirectSound(void)    { RET(0, 1); }
+static void b_BinkClose(void)              { RETV(1); }
+static void b_BinkDoFrame(void)            { RETV(1); }
+static void b_BinkNextFrame(void)          { RETV(1); }
+static void b_BinkWait(void)               { RETV(1); }
+static void b_BinkPause(void)              { RETV(2); }
+static void b_BinkSetSoundSystem(void)     { RETV(2); }
+static void b_BinkCopyToBufferRect(void)   { RETV(11); }
+
+/* ---------- d3d9.dll ---------- */
+static void p_D3DPERF_SetOptions(void)     { RETV(1); }
+
+/* ---------- d3dx9_38 (faltantes + argc correto nos já registrados) ---------- */
+#define D3DERR_INVALIDCALL 0x88760866u
+#define DX_E_FAIL         0x80004005u
+/* criação/carregamento: falha explícita (o jogo trata) */
+static void dx_D3DXLoadSurfaceFromSurface(void)          { RET(DX_E_FAIL, 5); }
+static void dx_D3DXSaveTextureToFileA(void)              { RET(DX_E_FAIL, 3); }
+static void dx_D3DXAssembleShaderFromFileA(void)         { RET(DX_E_FAIL, 6); }
+static void dx_D3DXCompileShaderFromFileA(void)          { RET(DX_E_FAIL, 11); }
+static void dx_D3DXGetShaderConstantTable(void)          { RET(DX_E_FAIL, 2); }
+static void dx_D3DXGetImageInfoFromFileInMemory(void)    { RET(DX_E_FAIL, 4); }
+static void dx_D3DXCreateCubeTextureFromFileInMemory(void)   { RET(D3DERR_INVALIDCALL, 6); }
+static void dx_D3DXCreateVolumeTextureFromFileInMemory(void){ RET(D3DERR_INVALIDCALL, 6); }
+/* perfil de GPU moderna fingida (o jogo segue o caminho de shaders) */
+static uint32_t arena_cstr(const char *s)
+{
+    extern uint32_t guest_alloc(size_t);
+    extern void *guest_ptr(uint32_t);
+    size_t n = strlen(s) + 1;
+    uint32_t va = guest_alloc((n + 3) & ~3u);
+    memcpy(guest_ptr(va), s, n);
+    return va;
+}
+static void dx_D3DXGetVertexShaderProfile(void)          { RETP(arena_cstr("vs_3_0"), 0); }
+static void dx_D3DXGetPixelShaderProfile(void)           { RETP(arena_cstr("ps_3_0"), 0); }
+/* D3DXMATRIX = 16 floats row-major (m[4][4]); vetores = 3/4 floats */
+static void dx_D3DXMatrixTranspose(void)                 /* (out, m) */
+{
+    float *o = (float *)APTR(0), *m = (float *)APTR(1);
+    if (o && m) for (int r = 0; r < 4; r++) for (int c = 0; c < 4; c++)
+        o[r * 4 + c] = m[c * 4 + r];
+    RET(0, 2);
+}
+static void dx_D3DXMatrixMultiplyTranspose(void)         /* (out, a, b): (a*b)^T */
+{
+    float *o = (float *)APTR(0), *a = (float *)APTR(1), *b = (float *)APTR(2);
+    if (o && a && b) for (int r = 0; r < 4; r++) for (int c = 0; c < 4; c++) {
+        float s = 0; for (int k = 0; k < 4; k++) s += a[r * 4 + k] * b[k * 4 + c];
+        o[c * 4 + r] = s;
+    }
+    RET(0, 3);
+}
+static void dx_D3DXVec4Transform(void)                   /* (out, in, m) */
+{
+    float *o = (float *)APTR(0), *i = (float *)APTR(1), *m = (float *)APTR(2);
+    if (o && i && m) for (int r = 0; r < 4; r++)
+        o[r] = m[r*4+0]*i[0] + m[r*4+1]*i[1] + m[r*4+2]*i[2] + m[r*4+3]*i[3];
+    RET(0, 3);
+}
+static void dx_D3DXVec3TransformCoord(void)              /* (out, in, m) + translação */
+{
+    float *o = (float *)APTR(0), *i = (float *)APTR(1), *m = (float *)APTR(2);
+    if (o && i && m) for (int r = 0; r < 3; r++)
+        o[r] = m[r*4+0]*i[0] + m[r*4+1]*i[1] + m[r*4+2]*i[2] + m[r*4+3];
+    RET(0, 3);
+}
+static void dx_D3DXVec3TransformNormal(void)             /* sem translação */
+{
+    float *o = (float *)APTR(0), *i = (float *)APTR(1), *m = (float *)APTR(2);
+    if (o && i && m) for (int r = 0; r < 3; r++)
+        o[r] = m[r*4+0]*i[0] + m[r*4+1]*i[1] + m[r*4+2]*i[2];
+    RET(0, 3);
+}
+static void dx_D3DXPlaneTransform(void)                  /* (out, p, m): transposta */
+{
+    float *o = (float *)APTR(0), *p = (float *)APTR(1), *m = (float *)APTR(2);
+    if (o && p && m) for (int r = 0; r < 4; r++) {
+        float t = p[3];
+        for (int c = 0; c < 3; c++) t += m[c * 4 + r] * p[c];
+        o[r] = t;
+    }
+    RET(0, 3);
+}
+static void dx_D3DXPlaneNormalize(void)                  /* (out, p) */
+{
+    float *o = (float *)APTR(0), *p = (float *)APTR(1);
+    if (o && p) {
+        float n = sqrtf(p[0]*p[0] + p[1]*p[1] + p[2]*p[2]);
+        if (n > 0.0f) { for (int i = 0; i < 3; i++) o[i] = p[i] / n; o[3] = p[3] / n; }
+        else memcpy(o, p, 16);
+    }
+    RET(0, 2);
+}
+/* argc correto nos que já existiam (dx_stum genérico com 4 desalinhava a pilha) */
+static void dx_D3DXAssembleShader(void)                  { RET(0, 6); }
+static void dx_D3DXCompileShader(void)                   { RET(0, 9); }
+static void dx_D3DXCreateBuffer(void)                    { RET(0, 1); }
+static void dx_D3DXCreateTextureFromFileInMemory(void)   { RET(0, 4); }
+static void dx_D3DXMatrixInverse(void)                   { RET(0, 3); }
+static void dx_D3DXMatrixMultiply(void)                  { RET(0, 3); }
+static void dx_D3DXMatrixRotationYawPitchRoll(void)      { RET(0, 4); }
+static void dx_D3DXVec3Normalize(void)                   { RET(0, 2); }
+
+/* ---------- ole32 / steam_api (faltantes) ---------- */
+static void o_CoFreeUnusedLibraries(void)                { RETV(0); }
+static void s_SteamAPI_UnregisterCallback(void)          { RETV(1); }
+
 /* ---------- ADVAPI32 ---------- */
 static void a_RegCloseKey(void)         { RET(0, 1); }
 static void a_RegCreateKeyExA(void)     { RET(0, 9); }
 static void a_RegOpenKeyExA(void)       { RET(0, 5); }
 static void a_RegQueryValueExA(void)    { RET(0, 6); }
 static void a_RegSetValueExA(void)      { RET(0, 6); }
-
-/* ---------- d3dx9_38 (stubs genéricos) ---------- */
-static void dx_stub(void) { RET(0, 4); }
 
 /* Tabela de shims — compatível com win32hle_register() */
 static const win32hle_shim stubs_boot[] = {
@@ -520,16 +675,77 @@ static const win32hle_shim stubs_boot[] = {
     { "RegQueryValueExA",         (recomp_func_t)a_RegQueryValueExA },
     { "RegSetValueExA",           (recomp_func_t)a_RegSetValueExA },
 
-    /* d3dx9_38 — stubs genéricos */
-    { "D3DXAssembleShader",             (recomp_func_t)dx_stub },
-    { "D3DXCompileShader",              (recomp_func_t)dx_stub },
-    { "D3DXCreateBuffer",               (recomp_func_t)dx_stub },
-    { "D3DXCreateTextureFromFileInMemory", (recomp_func_t)dx_stub },
-    { "D3DXMatrixInverse",              (recomp_func_t)dx_stub },
-    { "D3DXMatrixMultiply",             (recomp_func_t)dx_stub },
-    { "D3DXMatrixRotationYawPitchRoll", (recomp_func_t)dx_stub },
-    { "D3DXVec3Normalize",              (recomp_func_t)dx_stub },
-    { "D3DXVec3TransformCoord",         (recomp_func_t)dx_stub },
+    /* d3dx9_38 — os que existiam, agora com argc correto (o dx_stub genérico
+     * com 4 desalinharia a pilha); as transformações são implementadas */
+    { "D3DXVec3TransformCoord",         (recomp_func_t)dx_D3DXVec3TransformCoord },
+    { "D3DXVec3TransformNormal",  (recomp_func_t)dx_D3DXVec3TransformNormal },
+    { "D3DXVec4Transform",        (recomp_func_t)dx_D3DXVec4Transform },
+    { "D3DXMatrixTranspose",      (recomp_func_t)dx_D3DXMatrixTranspose },
+    { "D3DXMatrixMultiplyTranspose", (recomp_func_t)dx_D3DXMatrixMultiplyTranspose },
+    { "D3DXPlaneTransform",       (recomp_func_t)dx_D3DXPlaneTransform },
+    { "D3DXPlaneNormalize",       (recomp_func_t)dx_D3DXPlaneNormalize },
+    { "D3DXAssembleShader",             (recomp_func_t)dx_D3DXAssembleShader },
+    { "D3DXCompileShader",              (recomp_func_t)dx_D3DXCompileShader },
+    { "D3DXCreateBuffer",               (recomp_func_t)dx_D3DXCreateBuffer },
+    { "D3DXCreateTextureFromFileInMemory", (recomp_func_t)dx_D3DXCreateTextureFromFileInMemory },
+    { "D3DXMatrixInverse",              (recomp_func_t)dx_D3DXMatrixInverse },
+    { "D3DXMatrixMultiply",             (recomp_func_t)dx_D3DXMatrixMultiply },
+    { "D3DXMatrixRotationYawPitchRoll", (recomp_func_t)dx_D3DXMatrixRotationYawPitchRoll },
+    { "D3DXVec3Normalize",              (recomp_func_t)dx_D3DXVec3Normalize },
+    { "D3DXLoadSurfaceFromSurface",     (recomp_func_t)dx_D3DXLoadSurfaceFromSurface },
+    { "D3DXSaveTextureToFileA",         (recomp_func_t)dx_D3DXSaveTextureToFileA },
+    { "D3DXAssembleShaderFromFileA",    (recomp_func_t)dx_D3DXAssembleShaderFromFileA },
+    { "D3DXCompileShaderFromFileA",     (recomp_func_t)dx_D3DXCompileShaderFromFileA },
+    { "D3DXGetShaderConstantTable",     (recomp_func_t)dx_D3DXGetShaderConstantTable },
+    { "D3DXGetImageInfoFromFileInMemory", (recomp_func_t)dx_D3DXGetImageInfoFromFileInMemory },
+    { "D3DXCreateCubeTextureFromFileInMemory", (recomp_func_t)dx_D3DXCreateCubeTextureFromFileInMemory },
+    { "D3DXCreateVolumeTextureFromFileInMemory", (recomp_func_t)dx_D3DXCreateVolumeTextureFromFileInMemory },
+    { "D3DXGetVertexShaderProfile",     (recomp_func_t)dx_D3DXGetVertexShaderProfile },
+    { "D3DXGetPixelShaderProfile",      (recomp_func_t)dx_D3DXGetPixelShaderProfile },
+
+    /* USER32 — caminho do WinMain (faltavam: abortavam o boot) */
+    { "GetWindow",               (recomp_func_t)u_GetWindow },
+    { "ShowCursor",              (recomp_func_t)u_ShowCursor },
+    { "GetDoubleClickTime",      (recomp_func_t)u_GetDoubleClickTime },
+    { "SwapMouseButton",         (recomp_func_t)u_SwapMouseButton },
+    { "UnhookWindowsHookEx",     (recomp_func_t)u_UnhookWindowsHookEx },
+    { "SetWindowsHookExA",       (recomp_func_t)u_SetWindowsHookExA },
+    { "CallNextHookEx",          (recomp_func_t)u_CallNextHookEx },
+    { "EnumChildWindows",        (recomp_func_t)u_EnumChildWindows },
+    { "GetActiveWindow",         (recomp_func_t)u_GetActiveWindow },
+    { "GetAsyncKeyState",        (recomp_func_t)u_GetAsyncKeyState },
+    { "GetClassLongA",           (recomp_func_t)u_GetClassLongA },
+    { "EnumDisplayDevicesA",     (recomp_func_t)u_EnumDisplayDevicesA },
+    { "AdjustWindowRect",        (recomp_func_t)u_AdjustWindowRect },
+    { "SendInput",               (recomp_func_t)u_SendInput },
+    { "GetWindowTextA",          (recomp_func_t)u_GetWindowTextA },
+
+    /* KERNEL32 — tempo/console/debug */
+    { "CompareFileTime",         (recomp_func_t)k2_CompareFileTime },
+    { "FormatMessageA",          (recomp_func_t)k2_FormatMessageA },
+    { "FileTimeToSystemTime",    (recomp_func_t)k2_FileTimeToSystemTime },
+    { "FileTimeToLocalFileTime", (recomp_func_t)k2_FileTimeToLocalFileTime },
+    { "SystemTimeToTzSpecificLocalTime", (recomp_func_t)k2_SystemTimeToTzSpecificLocalTime },
+    { "DebugBreak",              (recomp_func_t)k2_DebugBreak },
+    { "SetFilePointerEx",        (recomp_func_t)k2_SetFilePointerEx },
+    { "WriteConsoleA",           (recomp_func_t)k2_WriteConsoleA },
+    { "WriteConsoleW",           (recomp_func_t)k2_WriteConsoleW },
+
+    /* binkw32 — vídeos de logo (stdcall decorado @N) */
+    { "_BinkOpen@8",             (recomp_func_t)b_BinkOpen },
+    { "_BinkOpenDirectSound@4",  (recomp_func_t)b_BinkOpenDirectSound },
+    { "_BinkClose@4",            (recomp_func_t)b_BinkClose },
+    { "_BinkDoFrame@4",          (recomp_func_t)b_BinkDoFrame },
+    { "_BinkNextFrame@4",        (recomp_func_t)b_BinkNextFrame },
+    { "_BinkWait@4",             (recomp_func_t)b_BinkWait },
+    { "_BinkPause@8",            (recomp_func_t)b_BinkPause },
+    { "_BinkSetSoundSystem@8",   (recomp_func_t)b_BinkSetSoundSystem },
+    { "_BinkCopyToBufferRect@44",(recomp_func_t)b_BinkCopyToBufferRect },
+
+    /* d3d9.dll + faltantes de OLE/steam */
+    { "D3DPERF_SetOptions",      (recomp_func_t)p_D3DPERF_SetOptions },
+    { "CoFreeUnusedLibraries",   (recomp_func_t)o_CoFreeUnusedLibraries },
+    { "SteamAPI_UnregisterCallback", (recomp_func_t)s_SteamAPI_UnregisterCallback },
     { NULL, NULL },
 };
 
