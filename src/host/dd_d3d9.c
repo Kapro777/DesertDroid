@@ -379,24 +379,21 @@ static void d_GetGammaRamp(void)       { dd_trace("GetGammaRamp");       RET(0, 
 /* SetTransform/SetRenderState/SetGammaRamp — aceita e ignora */
 static void d_SetGammaRamp(void)       { dd_trace("SetGammaRamp");       RET(0, 3); }
 
-/* ===== Stubs APENAS para métodos SEM implementação manual ===== */
-#define STUB(name, argc, ret) static void name(void) { dd_trace(#name); RET((ret), (argc)); }
-
-/* Device methods que NÃO têm implementação manual dedicada */
-STUB(d_QueryInterface,  2, 0)
-STUB(d_AddRef,         0, 1)
-STUB(d_Release,         0, 1)
-STUB(d_ShowCursor,     1, 1)
-STUB(d_CreateAdditionalSwapChain, 2, 0x88760866u)
-STUB(d_GetSwapChain,   3, 0x88760866u)
-STUB(d_GetNumberOfSwapChains, 0, 0)
-STUB(d_SetDialogBoxMode, 1, 0x88760866u)
-STUB(d_CreatePixelShader,  2, 0x88760866u)
-STUB(d_CreateVertexShader, 2, 0x88760866u)
-STUB(d_SetDisplayMode, 3, 0)
-STUB(d_SetCursorProperties, 4, 0)
-STUB(d_SetCursorPosition, 3, 0)
-STUB(d_GetRasterStatus, 2, 0)
+/* Device methods sem implementação manual dedicada (stubs minimais) */
+static void d_QueryInterface(void)     { dd_trace("QueryInterface"); RET(0, 2); }
+static void d_AddRef(void)             { dd_trace("AddRef"); RET(1, 0); }
+static void d_Release(void)            { dd_trace("Release"); RET(1, 0); }
+static void d_ShowCursor(void)         { dd_trace("ShowCursor"); RET(1, 1); }
+static void d_CreateAdditionalSwapChain(void) { dd_trace("CreateAdditionalSwapChain"); RET(0x88760866u, 2); }
+static void d_GetSwapChain(void)       { dd_trace("GetSwapChain"); RET(0x88760866u, 3); }
+static void d_GetNumberOfSwapChains(void) { dd_trace("GetNumberOfSwapChains"); RET(0, 0); }
+static void d_SetDialogBoxMode(void)   { dd_trace("SetDialogBoxMode"); RET(0x88760866u, 1); }
+static void d_CreatePixelShader(void)  { dd_trace("CreatePixelShader"); RET(0x88760866u, 2); }
+static void d_CreateVertexShader(void) { dd_trace("CreateVertexShader"); RET(0x88760866u, 2); }
+static void d_SetDisplayMode(void)     { dd_trace("SetDisplayMode"); RET(0, 3); }
+static void d_SetCursorProperties(void){ dd_trace("SetCursorProperties"); RET(0, 4); }
+static void d_SetCursorPosition(void)  { dd_trace("SetCursorPosition"); RET(0, 3); }
+static void d_GetRasterStatus(void)    { dd_trace("GetRasterStatus"); RET(0, 2); }
 
 static const char *const k_d3d9_methods[] = {
     "D3D9_IDirect3D9_QueryInterface", "D3D9_IDirect3D9_AddRef",
