@@ -316,15 +316,9 @@ static void s_SteamAPI_RegisterCallback(void) { RETV(2); }
 
 /* ---------- D3D9 ---------- */
 
-static void d_Direct3DCreate9(void) {
-    extern uint32_t g_eax;
-    extern uint32_t guest_alloc(size_t);
-    extern void *guest_ptr(uint32_t);
-    uint32_t obj = guest_alloc(256);
-    memset(guest_ptr(obj), 0, 256);
-    g_eax = obj;
-    RET(1, 1);
-}
+/* Direct3DCreate9 mora no dd_d3d9.c (COM HLE auto-anunciante, vtable real).
+ * Um stub aqui sobrescreveria o registro de la (newest-wins) com um objeto
+ * zerado — vtable NULL = crash na primeira chamada de metodo do guest. */
 
 /* ---------- OLE32 ---------- */
 
@@ -473,10 +467,9 @@ static const win32hle_shim stubs_boot[] = {
     { "SteamUtils",                (recomp_func_t)s_SteamUtils },
     { "SteamAPI_RegisterCallback", (recomp_func_t)s_SteamAPI_RegisterCallback },
 
-    /* D3D9 */
-    { "Direct3DCreate9",          (recomp_func_t)d_Direct3DCreate9 },
-
     /* OLE32 */
+    /* (Direct3DCreate9 vem do dd_d3d9.c: COM HLE com vtable real —
+     * um stub zerado aqui sobrescreveria o registro de la, newest-wins.) */
     { "CoInitialize",             (recomp_func_t)o_CoInitialize },
     { "CoInitializeEx",           (recomp_func_t)o_CoInitializeEx },
     { "CoUninitialize",           (recomp_func_t)o_CoUninitialize },
