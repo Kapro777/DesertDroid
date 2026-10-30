@@ -151,11 +151,47 @@ static void k_GetClientRect(void) {
     RET(1, 2);
 }
 
-/* GetSystemMetrics(nIndex) -> int */
+/* GetSystemMetrics(nIndex) -> int
+ *
+ * run 40992593558: o boot MORRIA antes do D3D9 sem crash algum — WinMain,
+ * logo apos o mutex de instancia unica, consulta SM_REMOTESESSION (0x1000);
+ * o stub devolvia 1 para QUALQUER indice (o RET(1,1) sobrescrevia o
+ * g_eax=800) -> teste != 0 = "sessao remota" -> MessageBoxA (texto em
+ * falloutnv.exe+0xC82A48: recusa de remote desktop) -> exit(0) antes de
+ * criar qualquer coisa grafica.
+ *
+ * Agora o indice importa. Caminhos que consultamos no boot:
+ *   - 0x1000 SM_REMOTESESSION -> 0 (sessao local; CI roda em container)
+ *   - 80 SM_CMONITORS -> 1 (um monitor: o dialogo de multi-monitor do
+ *     Gamebryo tela a saida tambem)
+ *   - 0 SM_CXSCREEN / 1 SM_CYSCREEN / 16/17 fullscreen -> 1920x1080
+ * O restante devolve 0 (neutro: checks "if (metric)" leem ausencia, que
+ * e a verdade no nosso host). Log one-shot por indice (cap 16) para a
+ * proxima boot mostrar o que mais o jogo perguntar. */
 static void k_GetSystemMetrics(void) {
-    extern uint32_t g_eax;
-    g_eax = 800u;
-    RET(1, 1);
+    extern uint32_t g_esp;
+    extern uint32_t dd_mem32(uint32_t va);
+    uint32_t n = dd_mem32(g_esp + 4);
+    uint32_t r = 0;
+    switch (n) {
+    case 0:      r = 1920; break;   /* SM_CXSCREEN    */
+    case 1:      r = 1080; break;   /* SM_CYSCREEN    */
+    case 16:     r = 1920; break;   /* SM_CXFULLSCREEN */
+    case 17:     r = 1080; break;   /* SM_CYFULLSCREEN */
+    case 80:     r = 1;    break;   /* SM_CMONITORS   */
+    case 81:     r = 1;    break;   /* SM_SAMEDISPLAYFORMAT */
+    case 0x1000: r = 0;    break;   /* SM_REMOTESESSION: sessao local */
+    case 19:     r = 1;    break;   /* SM_MOUSEPRESENT */
+    default:     r = 0;    break;
+    }
+    {
+        static uint32_t seen[16]; static int seen_n;
+        int dup = 0;
+        for (int i = 0; i < seen_n; i++) if (seen[i] == n) dup = 1;
+        if (!dup && seen_n < 16) { seen[seen_n++] = n;
+            fprintf(stderr, "[DesertDroid] GetSystemMetrics(%u) -> %u\n", n, r); }
+    }
+    RET(r, 1);
 }
 
 /* LoadIconA(...) -> HICON */
