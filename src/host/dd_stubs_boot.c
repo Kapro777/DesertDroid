@@ -430,31 +430,31 @@ static void u_AdjustWindowRect(void)       { RET(1, 3); }   /* TRUE: sem ajuste 
 static void u_SendInput(void)              { RET(0, 3); }
 static void u_GetWindowTextA(void)
 {
-    uint32_t buf = APTR(1);
+    uint32_t buf = A32(1);
     if (buf) MEM8(buf) = 0;
     RET(0, 3);
 }
 
 /* ---------- KERNEL32 (tempo/console/debug — faltavam no censo) ---------- */
 static void k2_CompareFileTime(void)       { RET(0, 2); }   /* iguais */
-static void k2_FormatMessageA(void)        { uint32_t b = APTR(4);
+static void k2_FormatMessageA(void)        { uint32_t b = A32(4);
                                               if (b) MEM8(b) = 0; RET(0, 6); }
 static void k2_FileTimeToSystemTime(void)  { void *st = (void *)APTR(1);
                                               if (st) memset(st, 0, 16); RET(1, 2); }
-static void k2_FileTimeToLocalFileTime(void){ uint32_t l = APTR(1);
-                                              if (l) MEM64(l) = MEM64(APTR(0)); RET(1, 2); }
+static void k2_FileTimeToLocalFileTime(void){ uint32_t l = A32(1);
+                                              if (l) MEM64(l) = MEM64(A32(0)); RET(1, 2); }
 static void k2_SystemTimeToTzSpecificLocalTime(void)
 {
-    uint32_t lst = APTR(2);
-    if (lst) for (int i = 0; i < 4; i++) MEM32(lst + 4 * i) = MEM32(APTR(1) + 4 * i);
+    uint32_t lst = A32(2);
+    if (lst) for (int i = 0; i < 4; i++) MEM32(lst + 4 * i) = MEM32(A32(1) + 4 * i);
     RET(1, 3);
 }
 static void k2_DebugBreak(void)            { RETV(0); }
-static void k2_SetFilePointerEx(void)      { uint32_t nw = APTR(2);
+static void k2_SetFilePointerEx(void)      { uint32_t nw = A32(2);
                                               if (nw) MEM64(nw) = 0; RET(1, 4); }
-static void k2_WriteConsoleA(void)         { uint32_t w = APTR(3);
+static void k2_WriteConsoleA(void)         { uint32_t w = A32(3);
                                               if (w) MEM32(w) = A32(2); RET(1, 5); }
-static void k2_WriteConsoleW(void)         { uint32_t w = APTR(3);
+static void k2_WriteConsoleW(void)         { uint32_t w = A32(3);
                                               if (w) MEM32(w) = A32(2); RET(1, 5); }
 
 /* ---------- binkw32 (vídeos de logo: falha limpa = NULL/void) ---------- */
