@@ -160,7 +160,18 @@ static void dd_ovr_00EC408C(void)
         fprintf(stderr, "[DesertDroid] abortando (0xC0000409)\n");
         abort();
     }
-    /* path feliz: repz ret = retornar; o bridge devolve ao caller. */
+    /* path feliz: repz ret = retornar; o bridge devolve ao caller.
+     * Observabilidade: as 3 primeiras ativas entregam no boot.log a
+     * prova de que o hijack do RECOMP_ENTER realmente interceptou. */
+    {
+        static int n = 0;
+        if (n < 3) {
+            fprintf(stderr, "[DesertDroid] /GS check 00EC408C ok "
+                            "(ecx=%#x,_cookie=%#x) [%d]\n",
+                    g_ecx, cookie, n);
+        }
+        n++;
+    }
 }
 
 void dd_crt_overrides_register(void)
