@@ -961,7 +961,7 @@ index 9494bbc..3e30657 100644
  static void k_VirtualFree(void) { RET(1, 3); }
  
 diff --git a/runtime/win32hle/kernel32_crt.c b/runtime/win32hle/kernel32_crt.c
-index f9dcce6..7b770f1 100644
+index f9dcce6..b7a8e77 100644
 --- a/runtime/win32hle/kernel32_crt.c
 +++ b/runtime/win32hle/kernel32_crt.c
 @@ -9,6 +9,7 @@
@@ -995,7 +995,7 @@ index f9dcce6..7b770f1 100644
  static void k_FreeEnvironmentStringsA(void) { RET(1, 1); }
  static void k_FreeEnvironmentStringsW(void) { RET(1, 1); }
  static void k_GetEnvironmentVariableA(void) { RET(0, 3); }   /* not found */
-@@ -90,7 +99,39 @@ static void k_GetTimeZoneInformation(void) { RET(0u, 1); } /* TIME_ZONE_ID_UNKNO
+@@ -90,7 +99,63 @@ static void k_GetTimeZoneInformation(void) { RET(0u, 1); } /* TIME_ZONE_ID_UNKNO
  
  /* --- SEH / error hooks: the startup installs these; stub to not fail --- */
  static void k_SetUnhandledExceptionFilter(void) { RET(0, 1); }
@@ -1018,10 +1018,34 @@ index f9dcce6..7b770f1 100644
 +    uint32_t npar  = er ? *(const uint32_t *)guest_ptr(er + 0x10): 0;
 +    uint32_t p0 = (er && npar > 0) ? *(const uint32_t *)guest_ptr(er + 0x14) : 0;
 +    uint32_t p1 = (er && npar > 1) ? *(const uint32_t *)guest_ptr(er + 0x18) : 0;
++    uint32_t ctx = ep ? *(const uint32_t *)guest_ptr(ep + 0x4) : 0;
 +    fprintf(stderr,
 +        "[crt] UnhandledExceptionFilter: code=%#x flags=%#x chained=%#x "
 +        "addr=%#x npar=%u info0=%#x info1=%#x (ctx=%#x)\n",
-+        code, flags, chain, eaddr, npar, p0, p1, ep ? *(const uint32_t *)guest_ptr(ep + 0x4) : 0);
++        code, flags, chain, eaddr, npar, p0, p1, ctx);
++
++    if (ctx) {
++        /* CONTEXT x86-32 (WOW64 layout, sem FPU): edi 0x9C esi 0xA0 ebx 0xA4
++         * edx 0xA8 ecx 0xAC eax 0xB0 ebp 0xB4 eip 0xB8 eflags 0xC0 esp 0xC4 */
++        const uint32_t *c = (const uint32_t *)guest_ptr(ctx);
++        uint32_t edi = c[0x9C/4], esi = c[0xA0/4], ebx = c[0xA4/4];
++        uint32_t edx = c[0xA8/4], ecx = c[0xAC/4], eax = c[0xB0/4];
++        uint32_t ebp2 = c[0xB4/4], eip = c[0xB8/4];
++        uint32_t efl = c[0xC0/4], esp2 = c[0xC4/4];
++        fprintf(stderr,
++            "[crt]  ctx: eip=%#x ebp=%#x esp=%#x eax=%#x ebx=%#x ecx=%#x "
++            "edx=%#x esi=%#x edi=%#x eflags=%#x\n",
++            eip, ebp2, esp2, eax, ebx, ecx, edx, esi, edi, efl);
++        /* 16 bytes da instrucao faultante — decodifico offline com capstone */
++        fprintf(stderr,
++            "[crt]  @eip: %08x %08x %08x %08x | ebp0=%#x esp0=%#x\n",
++            eip >= 0x401000u ? *(const uint32_t *)guest_ptr(eip) : 0u,
++            eip >= 0x401000u ? *(const uint32_t *)guest_ptr(eip + 4) : 0u,
++            eip >= 0x401000u ? *(const uint32_t *)guest_ptr(eip + 8) : 0u,
++            eip >= 0x401000u ? *(const uint32_t *)guest_ptr(eip + 12) : 0u,
++            ebp2 ? *(const uint32_t *)guest_ptr(ebp2) : 0u,
++            esp2 ? *(const uint32_t *)guest_ptr(esp2) : 0u);
++    }
 +
 +    switch (code) {
 +    case 0xC0000005u: fprintf(stderr, "[crt]  ^^^ ACCESS_VIOLATION — %s em %#x\n",
